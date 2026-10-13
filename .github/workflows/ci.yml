@@ -56,11 +56,22 @@ jobs:
         run: |
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl install "$SIMULATOR_ID" DerivedData/Build/Products/Debug-iphonesimulator/QuotaDock.app
+          xcrun simctl ui "$SIMULATOR_ID" appearance light
           xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo
           sleep 5
           xcrun simctl io "$SIMULATOR_ID" screenshot native-demo.png
+          xcrun simctl ui "$SIMULATOR_ID" appearance dark
+          sleep 2
+          xcrun simctl io "$SIMULATOR_ID" screenshot native-dark.png
+          xcrun simctl ui "$SIMULATOR_ID" appearance light
+          for STATE in unknown settings cloud; do
+            xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
+            xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo "--${STATE}-preview"
+            sleep 3
+            xcrun simctl io "$SIMULATOR_ID" screenshot "native-${STATE}.png"
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-demo
-          path: apple/native-demo.png
+          path: apple/native-*.png
           retention-days: 7
