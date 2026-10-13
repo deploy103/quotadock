@@ -1,0 +1,66 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: Node 22 bridge and imported skill tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npm test
+      - run: python3 .agents/skills/checking-codexbar-usage/scripts/test_codexbar.py
+  apple:
+    name: iPhone and Watch simulator build and contract tests
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: brew install xcodegen
+      - name: Generate project
+        working-directory: apple
+        run: xcodegen generate
+      - name: Test on available iPhone simulator
+        working-directory: apple
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"]))')
+          echo "SIMULATOR_ID=$DEVICE" >> "$GITHUB_ENV"
+          xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath DerivedData test CODE_SIGNING_ALLOWED=NO
+      - name: Build Watch app and complications
+        working-directory: apple
+        run: |
+          xcodebuild -project QuotaDock.xcodeproj -target QuotaDockWatch -sdk watchsimulator build CODE_SIGNING_ALLOWED=NO
+          xcodebuild -project QuotaDock.xcodeproj -target QuotaDockWatchWidgets -sdk watchsimulator build CODE_SIGNING_ALLOWED=NO
+      - name: Capture rendered native demo
+        working-directory: apple
+        run: |
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl install "$SIMULATOR_ID" DerivedData/Build/Products/Debug-iphonesimulator/QuotaDock.app
+          xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo
+          sleep 5
+          xcrun simctl io "$SIMULATOR_ID" screenshot native-demo.png
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-demo
+          path: apple/native-demo.png
+          retention-days: 7
