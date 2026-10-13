@@ -80,6 +80,10 @@ struct QuotaWidgetView: View {
 
 struct ProviderWidget: Widget {
     let providerID: ProviderID
+
+    init() { self.init(providerID: .claude) }
+    init(providerID: ProviderID) { self.providerID = providerID }
+
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "QuotaDock.\(providerID.rawValue)", provider: QuotaTimeline()) { entry in
             QuotaWidgetView(entry: entry, providerID: providerID)
