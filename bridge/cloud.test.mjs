@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, stat, chmod, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { accounts, origin, observations } from './cloud.mjs';
 import { collectAccounts, listAccounts, validateBindings } from './collector.mjs';
 import { snapshotFromRows } from './snapshot.mjs';
@@ -26,6 +28,38 @@ test('cloud uploads only whitelist fields and preserves source timestamp/no-data
   assert.equal(JSON.stringify(o).includes('SECRET'), false); assert.equal(Object.hasOwn(o, 'message'), false);
   const [missing] = observations([a], snapshotFromRows([]));
   assert.equal(missing.observedAt, null); assert.equal(missing.state, 'unavailable');
+});
+
+test('mapping CLI stores private canonical bindings and preserves them on invalid or unsafe updates', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'quotadock-map-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const dir = join(home, '.config', 'quotadock-cloud');
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(join(dir, 'collector.json'), JSON.stringify({
+    base: 'https://example.invalid', collectorToken: 'c'.repeat(43),
+    expiresAt: Date.now() + 60000, accounts: [a, b],
+  }), { mode: 0o600 });
+  const cli = (...args) => promisify(execFile)(process.execPath, [new URL('./cloud.mjs', import.meta.url).pathname, 'map', ...args], {
+    env: { ...process.env, HOME: home }, timeout: 5000,
+  });
+  const first = '1'.repeat(64), second = '2'.repeat(64);
+  await cli(a.id.toUpperCase(), 'codex', first, 'oauth');
+  await cli(b.id.toUpperCase(), 'codex', second, 'oauth');
+  const file = join(dir, 'accounts.json');
+  const saved = await readFile(file, 'utf8');
+  assert.deepEqual(JSON.parse(saved), {
+    [a.id]: { provider: 'codex', fingerprint: first, source: 'oauth' },
+    [b.id]: { provider: 'codex', fingerprint: second, source: 'oauth' },
+  });
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+  for (const args of [[b.id, 'codex', first, 'oauth'], [a.id, 'codex', first, 'cli'], ['cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'codex', first, 'oauth']]) {
+    await assert.rejects(cli(...args));
+    assert.equal(await readFile(file, 'utf8'), saved);
+  }
+  await chmod(file, 0o644);
+  await assert.rejects(cli(a.id, 'codex', second, 'oauth'));
+  assert.equal(await readFile(file, 'utf8'), saved);
+  assert.deepEqual((await readdir(dir)).sort(), ['accounts.json', 'collector.json']);
 });
 
 test('independent local accounts use durable keys, not order or ambient credentials, and never upload identity', async t => {

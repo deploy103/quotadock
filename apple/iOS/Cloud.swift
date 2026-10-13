@@ -333,8 +333,12 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     }
     @objc private func protectedDataUnavailable() { foreground = false }
 
-    func connect(base: String) async {
+    func connect(base: String, quotaStorageConsent: Bool, collectorProcessingConsent: Bool) async {
         guard !busy, !reading, foreground else { return }
+        guard quotaStorageConsent, collectorProcessingConsent else {
+            status = "Consent required for quota storage and local collector processing. No sign-in started."
+            return
+        }
         busy = true
         let current = revision
         do {
@@ -649,13 +653,18 @@ struct CloudBatchView: View {
         Section("Refresh batch · \(ids.count)/50") {
             Text("Force, foreground auto and new Live use these slots. First 50 are selected initially; registration remains tier-dependent. Stop Live before changing its batch; resumed Live keeps the server's slot set.").font(.caption)
             ForEach(slots) { slot in
-                Toggle("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))", isOn: Binding(get: {
+                Toggle(isOn: Binding(get: {
                     ids.contains(slot.id)
                 }, set: { enabled in
                     var next = ids
                     if enabled { next.append(slot.id) } else { next.removeAll { $0 == slot.id } }
                     select(next)
-                })).disabled(locked || (!ids.contains(slot.id) && ids.count >= 50))
+                })) {
+                    HStack {
+                        ProviderIcon(id: slot.provider)
+                        Text("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))")
+                    }
+                }.disabled(locked || (!ids.contains(slot.id) && ids.count >= 50))
             }
         }
     }
@@ -665,7 +674,7 @@ struct CloudBatchView: View {
 // Isolated UI sample: no Apple identity, session, entitlement or network client.
 struct CloudBatchPreview: View {
     @State private var selection: [UUID] = []
-    private let slots = [ProviderID.claude, .claude, .codex, .gemini].enumerated().map { index, provider in
+    private let slots = [ProviderID.claude, .codex, .codex, .gemini, .grok].enumerated().map { index, provider in
         CloudAccount(id: UUID(uuidString: "0000000\(index)-0000-4000-8000-000000000000")!, provider: provider)
     }
     var body: some View {
@@ -684,7 +693,8 @@ struct CloudBatchPreview: View {
 
 struct CloudView: View {
     @ObservedObject var model: CloudModel
-    @State private var consent = false
+    @State private var quotaStorageConsent = false
+    @State private var collectorProcessingConsent = false
     @AppStorage("cloudTrustedBaseURL") private var base = "https://usage.mvtp.cloud"
     @State private var provider = ProviderID.claude
     @State private var confirmDelete = false
@@ -697,8 +707,15 @@ struct CloudView: View {
             if model.session == nil {
                 TextField("Trusted HTTPS server", text: $base).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Only connect to a server you trust. The server stores sanitized quota, a pseudonymous Apple account, sessions and refresh counters — not provider credentials. A local collector processes quota for your slots. You can instead use Pair bridge without cloud.")
-                Toggle("I consent to quota storage and collector processing", isOn: $consent)
-                Button("Connect with Apple") { Task { await model.connect(base: base) } }.disabled(!consent || model.busy)
+                Toggle("Store sanitized quota and account metadata", isOn: $quotaStorageConsent)
+                Toggle("Allow local collector quota processing", isOn: $collectorProcessingConsent)
+                Text("Both consents are required for cloud. Purchases are unavailable in this preview.").font(.caption).foregroundStyle(.secondary)
+                Button("Connect with Apple") {
+                    let trustedBase = base
+                    let storage = quotaStorageConsent
+                    let processing = collectorProcessingConsent
+                    Task { await model.connect(base: trustedBase, quotaStorageConsent: storage, collectorProcessingConsent: processing) }
+                }.disabled(!quotaStorageConsent || !collectorProcessingConsent || model.busy)
             } else {
                 Text(model.budget)
                 Text("Local collector required. No provider login or purchases on this phone.")
@@ -773,8 +790,12 @@ struct CloudView: View {
                 Button("Delete cloud account and data", role: .destructive) { confirmDelete = true }
             }
         }.navigationTitle("Optional cloud")
+            .onChange(of: base) { _, _ in
+                quotaStorageConsent = false; collectorProcessingConsent = false
+            }
             .onChange(of: model.session?.token) { _, _ in
                 selectedSlots = []; collectorConsent = false; collectorCode = ""
+                quotaStorageConsent = false; collectorProcessingConsent = false
             }
             .onChange(of: model.slots.map(\.id)) { _, ids in
                 selectedSlots.formIntersection(Set(ids)); collectorConsent = false

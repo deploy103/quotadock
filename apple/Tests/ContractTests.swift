@@ -197,6 +197,18 @@ final class ContractTests: XCTestCase {
         XCTAssertNil(CloudCache.load())
     }
 
+    @MainActor
+    func testCloudSignInRequiresBothConsentsBeforeStartingAuthorization() async {
+        for (storage, processing) in [(false, false), (true, false), (false, true)] {
+            let model = CloudModel()
+            model.foreground = true
+            // An invalid target distinguishes consent rejection from URL/network failure.
+            await model.connect(base: "not-a-server", quotaStorageConsent: storage, collectorProcessingConsent: processing)
+            XCTAssertTrue(model.status.contains("Consent required"))
+            XCTAssertFalse(model.busy)
+        }
+    }
+
     private let fixture = Data("""
     {"schemaVersion":1,"generatedAt":"2026-10-13T10:00:00Z","demo":false,"providers":[{"id":"codex","name":"Codex","plan":null,"state":"unavailable","source":"codexbar","message":null,"observedAt":null,"windows":[{"id":"primary","label":"Session","remainingPercent":null,"resetsAt":null}]}]}
     """.utf8)
