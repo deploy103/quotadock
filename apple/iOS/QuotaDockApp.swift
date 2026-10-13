@@ -94,6 +94,7 @@ struct DockView: View {
     @State private var showPairing = false
     @State private var showSettings = false
     @State private var showCloudPreview = false
+    @State private var showBatchPreview = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -130,10 +131,16 @@ struct DockView: View {
                 .sheet(isPresented: $showPairing) { PairingView(model: model) }
                 .sheet(isPresented: $showSettings) { SettingsView() }
                 .sheet(isPresented: $showCloudPreview) { NavigationStack { CloudView(model: model.cloud) } }
+                .sheet(isPresented: $showBatchPreview) {
+                    #if DEBUG
+                    CloudBatchPreview()
+                    #endif
+                }
                 .onAppear {
                     #if DEBUG
                     showSettings = ProcessInfo.processInfo.arguments.contains("--settings-preview")
                     showCloudPreview = ProcessInfo.processInfo.arguments.contains("--cloud-preview")
+                    showBatchPreview = ProcessInfo.processInfo.arguments.contains("--batch-preview")
                     #endif
                 }
         }

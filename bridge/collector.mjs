@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
-import { providers, snapshotFromRows } from './snapshot.mjs';
+import { createHash } from 'node:crypto';
+import { providers, snapshotFromRows, normalizeProvider } from './snapshot.mjs';
 
 // Never run a shell or accept provider commands over HTTP. Upstream logs stay private.
-function query(binary, id, timeoutMs) {
+function query(binary, id, timeoutMs, source = null) {
   return new Promise(resolve => {
     let chunks = [], size = 0, completed = false;
-    const child = spawn(binary, ['usage', '--provider', id, '--format', 'json', '--json-only'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, detached: process.platform !== 'win32' });
+    const args = ['usage', '--provider', id, '--format', 'json', '--json-only'];
+    if (source) args.push('--all-accounts', '--source', source);
+    const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, detached: process.platform !== 'win32' });
     const failed = () => [{ provider: id, error: { kind: 'provider' } }];
     const stop = () => {
       try { if (process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch {}
@@ -31,6 +34,55 @@ function query(binary, id, timeoutMs) {
 export async function collect({ binary = 'codexbar', timeoutMs = 12000 } = {}) {
   const rows = (await Promise.all(Object.keys(providers).map(id => query(binary, id, timeoutMs)))).flat();
   return snapshotFromRows(rows);
+}
+
+// Keys can contain upstream email/workspace identifiers. Only opaque hashes stay
+// in local mapping files; neither raw keys nor hashes are uploaded in observations.
+export function accountFingerprint(provider, key) {
+  if (!Object.hasOwn(providers, provider) || typeof key !== 'string' || !key.length || key.length > 1024) return null;
+  return createHash('sha256').update(`${provider}\0${key}`).digest('hex');
+}
+function accountSource(provider, source) {
+  if (!['claude', 'codex', 'grok'].includes(provider) || !['oauth', 'web'].includes(source) || (provider === 'codex' && source !== 'oauth')) throw Error('unsupported_mapping');
+}
+export async function listAccounts(provider, source = 'oauth', { binary = 'codexbar', timeoutMs = 12000 } = {}) {
+  accountSource(provider, source);
+  const rows = await query(binary, provider, timeoutMs, source);
+  const keys = rows.map(r => accountFingerprint(provider, r.cacheAccountKey)).filter(Boolean);
+  // Duplicate keys cannot identify a unique local reading, even if values agree.
+  return keys.filter((key, index) => keys.indexOf(key) === index && keys.lastIndexOf(key) === index);
+}
+export function validateBindings(slots, bindings) {
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings) || Object.keys(bindings).length > 50) throw Error('unsupported_mapping');
+  const seen = new Set();
+  for (const [id, b] of Object.entries(bindings)) {
+    const slot = slots.find(a => a.id === id);
+    if (!slot || !b || Object.keys(b).sort().join(',') !== 'fingerprint,provider,source' || b.provider !== slot.provider || !/^[a-f0-9]{64}$/.test(b.fingerprint)) throw Error('unsupported_mapping');
+    accountSource(b.provider, b.source);
+    const key = `${b.provider}:${b.fingerprint}`;
+    if (seen.has(key)) throw Error('unsupported_mapping');
+    seen.add(key);
+  }
+  for (const slot of slots) {
+    const duplicates = slots.filter(a => a.provider === slot.provider).length > 1;
+    if (duplicates && (slot.provider === 'gemini' || !bindings[slot.id])) throw Error('unsupported_mapping');
+  }
+}
+export async function collectAccounts(slots, bindings, { binary = 'codexbar', timeoutMs = 12000 } = {}) {
+  validateBindings(slots, bindings);
+  const groups = new Map();
+  for (const slot of slots) {
+    const source = bindings[slot.id]?.source ?? null;
+    groups.set(`${slot.provider}:${source}`, { provider: slot.provider, source });
+  }
+  const rows = new Map(await Promise.all([...groups].map(async ([key, { provider, source }]) => [key, await query(binary, provider, timeoutMs, source)])));
+  return slots.map(slot => {
+    const binding = bindings[slot.id];
+    const candidates = rows.get(`${slot.provider}:${binding?.source ?? null}`).filter(row => !binding || accountFingerprint(slot.provider, row.cacheAccountKey) === binding.fingerprint);
+    // No positional, label or ambient-account fallback for a missing/ambiguous key.
+    const payload = candidates.length === 1 ? candidates[0] : { error: { kind: 'account' } };
+    return { accountId: slot.id, ...normalizeProvider(slot.provider, payload) };
+  });
 }
 
 export function cachedCollector(load, { ttlMs = 60000, now = Date.now } = {}) {

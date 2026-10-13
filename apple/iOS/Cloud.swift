@@ -83,10 +83,33 @@ struct CloudCollector: Decodable, Identifiable {
 
 enum CollectorApproval {
     static func valid(code: String, selected: Set<UUID>, slots: [CloudAccount]) -> Bool {
-        let assigned = slots.filter { selected.contains($0.id) }
         return code.count == 8 && code.utf8.allSatisfy { (48...57).contains($0) || (65...70).contains($0) }
-            && !selected.isEmpty && selected.count <= 50 && assigned.count == selected.count
-            && Set(assigned.map(\.provider)).count == assigned.count
+            && CloudBatchSelection.valid(Array(selected), slots: slots)
+    }
+}
+
+// In-memory only: selection is not an identity or a persisted credential.
+struct CloudBatchSelection {
+    private(set) var ids: [UUID] = []
+    private var initialized = false
+    static func valid(_ ids: [UUID], slots: [CloudAccount]) -> Bool {
+        !ids.isEmpty && ids.count <= 50 && Set(ids).count == ids.count
+            && Set(ids).isSubset(of: Set(slots.map(\.id)))
+    }
+    mutating func reconcile(slots: [CloudAccount]) {
+        let owned = Set(slots.map(\.id))
+        if !initialized, !slots.isEmpty {
+            ids = Array(slots.map(\.id).prefix(50))
+            initialized = true
+        } else {
+            ids.removeAll { !owned.contains($0) }
+        }
+    }
+    mutating func select(_ ids: [UUID], slots: [CloudAccount]) -> Bool {
+        guard ids.isEmpty || Self.valid(ids, slots: slots) else { return false }
+        self.ids = ids
+        initialized = true
+        return true
     }
 }
 
@@ -266,7 +289,17 @@ struct CloudClient {
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     @Published var session = CloudSessionStore.load()
     @Published var snapshot = CloudSessionStore.load() == nil ? nil : CloudCache.load()
-    @Published var slots: [CloudAccount] = []
+    @Published var slots: [CloudAccount] = [] {
+        didSet { refreshSelection.reconcile(slots: slots) }
+    }
+    @Published private(set) var refreshSelection = CloudBatchSelection()
+    var selectionLocked: Bool { liveEnabled || me?.liveSession != nil || !liveSlotIDs.isEmpty }
+    func selectRefreshSlots(_ ids: [UUID]) {
+        guard !busy, !selectionLocked else { return }
+        if !refreshSelection.select(ids, slots: slots) {
+            status = "Select distinct owned slots, at most 50 per batch."
+        }
+    }
     @Published var status = "Cloud is optional. A local collector is required; this phone cannot collect provider quotas."
     @Published var budget = ""
     @Published var busy = false
@@ -364,6 +397,9 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                                         expiresAt: Date().addingTimeInterval(Double(min(login.expiresIn, 3600))))
                 onSwitch?()
                 try CloudSessionStore.save(next)
+                liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil
+                liveSlotIDs = []; lastLiveRequest = nil; me = nil; slots = []
+                refreshSelection = CloudBatchSelection()
                 PairingStore.remove(); session = next
                 await read(internalWork: true)
             } catch { if revision == challenge.revision { status = "Server sign-in failed. No cloud session saved." } }
@@ -376,6 +412,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         liveSlotIDs = []; lastLiveRequest = nil
         busy = false
         revision += 1; challenge = nil; controller = nil; session = nil; snapshot = nil; slots = []; budget = ""
+        refreshSelection = CloudBatchSelection()
         CloudSessionStore.remove(); CloudCache.clear(); onSwitch?()
     }
     func disconnect(delete: Bool) async {
@@ -408,7 +445,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             let nextSlots = try JSONDecoder().decode(Accounts.self, from: accounts).accounts
             guard current == revision, session != nil, foreground, !Task.isCancelled else { return }
             slots = nextSlots; snapshot = next
-            if liveEnabled, Set(nextSlots.map(\.id)) != Set(liveSlotIDs) {
+            if liveEnabled, !CloudBatchSelection.valid(liveSlotIDs, slots: nextSlots) {
                 liveEnabled = false; liveTask?.cancel()
             }
             self.me = verified; collectors = paired?.collectors ?? []
@@ -442,14 +479,17 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     func refresh(force: Bool, live: Bool = false) async {
         guard !busy, !reading, foreground, !Task.isCancelled, !liveEnabled || live else { return }
         guard let client, !slots.isEmpty else { await read(); return }
-        guard slots.count <= 50 else { status = "Select at most 50 slots per refresh; this phone currently refreshes all slots."; return }
+        let ids = live ? liveSlotIDs : refreshSelection.ids
+        guard CloudBatchSelection.valid(ids, slots: slots) else {
+            status = "Select 1–50 distinct owned slots per refresh."; return
+        }
         busy = true
         let current = revision
         defer { if current == revision { busy = false } }
         do {
             if live { lastLiveRequest = Date() }
             let data = try await client.request("v2/refresh", method: "POST", body: [
-                "accountIds": (live ? liveSlotIDs : slots.map(\.id)).map(\.uuidString), "mode": live ? "live" : force ? "force" : "auto",
+                "accountIds": ids.map(\.uuidString), "mode": live ? "live" : force ? "force" : "auto",
                 "idempotencyKey": UUID().uuidString])
             let job = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             guard current == revision, foreground, !Task.isCancelled else { return }
@@ -466,14 +506,17 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     }
 
     func startLive() {
-        guard me?.limits.live == true, !busy, !reading, slots.count <= 50, !slots.isEmpty else { return }
+        guard me?.limits.live == true, !busy, !reading else { return }
         guard liveDeadline.map({ Date() < $0 }) ?? true else { status = "Stop the previous Live session before starting another."; return }
         if let active = me?.liveSession {
             liveSlotIDs = active.accountIds
             liveDeadline = active.deadlineDate
         }
-        if liveStartedAt == nil { liveStartedAt = Date(); if liveSlotIDs.isEmpty { liveSlotIDs = slots.map(\.id) } }
-        guard Set(liveSlotIDs) == Set(slots.map(\.id)) else { status = "Stop Live before changing its selected slots."; return }
+        if liveSlotIDs.isEmpty { liveSlotIDs = refreshSelection.ids }
+        guard CloudBatchSelection.valid(liveSlotIDs, slots: slots) else {
+            status = "Live requires 1–50 distinct owned slots. Stop an obsolete session before changing slots."; return
+        }
+        if liveStartedAt == nil { liveStartedAt = Date() }
         liveEnabled = true
         scheduleLive()
     }
@@ -597,6 +640,48 @@ struct CloudReadingsView: View {
     }
 }
 
+struct CloudBatchView: View {
+    let slots: [CloudAccount]
+    let ids: [UUID]
+    let locked: Bool
+    let select: ([UUID]) -> Void
+    var body: some View {
+        Section("Refresh batch · \(ids.count)/50") {
+            Text("Force, foreground auto and new Live use these slots. First 50 are selected initially; registration remains tier-dependent. Stop Live before changing its batch; resumed Live keeps the server's slot set.").font(.caption)
+            ForEach(slots) { slot in
+                Toggle("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))", isOn: Binding(get: {
+                    ids.contains(slot.id)
+                }, set: { enabled in
+                    var next = ids
+                    if enabled { next.append(slot.id) } else { next.removeAll { $0 == slot.id } }
+                    select(next)
+                })).disabled(locked || (!ids.contains(slot.id) && ids.count >= 50))
+            }
+        }
+    }
+}
+
+#if DEBUG
+// Isolated UI sample: no Apple identity, session, entitlement or network client.
+struct CloudBatchPreview: View {
+    @State private var selection: [UUID] = []
+    private let slots = [ProviderID.claude, .claude, .codex, .gemini].enumerated().map { index, provider in
+        CloudAccount(id: UUID(uuidString: "0000000\(index)-0000-4000-8000-000000000000")!, provider: provider)
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Text("DEMO · selection sample only, no account or server").font(.headline)
+                CloudBatchView(slots: slots, ids: selection, locked: false) { ids in
+                    if ids.isEmpty || CloudBatchSelection.valid(ids, slots: slots) { selection = ids }
+                }
+            }.navigationTitle("Refresh selection")
+                .onAppear { selection = [slots[0].id, slots[2].id] }
+        }
+    }
+}
+#endif
+
 struct CloudView: View {
     @ObservedObject var model: CloudModel
     @State private var consent = false
@@ -633,7 +718,7 @@ struct CloudView: View {
                     if me.limits.live {
                         Text("Paid Live: explicit opt-in, target 60-second foreground checks. One allowance begins on first fresh success; the server's 30-minute wall deadline continues while hidden or locked. Resuming uses the same server session.").font(.caption)
                         Button(model.liveEnabled ? "Live checks running" : "Start / resume Live") { model.startLive() }
-                            .disabled(model.busy || model.liveEnabled || model.slots.isEmpty || model.slots.count > 50)
+                            .disabled(model.busy || model.liveEnabled || model.slots.isEmpty)
                         Button("Stop Live session") { Task { await model.stopLive() } }
                         if let deadline = model.liveDeadline { Text("Live ends: \(deadline.formatted())").font(.caption) }
                     } else { Text("Live requires a verified paid entitlement. Purchases are unavailable here.").font(.caption) }
@@ -642,6 +727,9 @@ struct CloudView: View {
                     ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.self) { Text($0.displayName).tag($0) }
                 }
                 Button("Add provider slot") { Task { await model.mutate(path: "v2/accounts", method: "POST", body: ["provider": provider.rawValue]) } }.disabled(model.busy || model.liveEnabled || model.me == nil || model.me?.limits.accounts.map { model.slots.count >= $0 } == true)
+                CloudBatchView(slots: model.slots, ids: model.refreshSelection.ids, locked: model.busy || model.selectionLocked) { ids in
+                    model.selectRefreshSlots(ids)
+                }
                 ForEach(model.slots) { slot in
                     VStack(alignment: .leading) {
                         Text("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))")
@@ -655,7 +743,7 @@ struct CloudView: View {
                     }
                 }
                 Section("Local collector approval") {
-                    Text("The initial CLI supports one assigned slot per provider. Select only matching local provider slots, never duplicate provider slots. Approval grants access to quota jobs for these slots only, not your Apple session. Never copy or export the Apple session.").font(.caption)
+                    Text("Duplicate-provider slots require independent CLI account mappings; Gemini remains limited to one local account. Approval authorizes slot access, not validation of real provider identities. It grants quota jobs for these slots only, not your Apple session. Never copy or export the Apple session.").font(.caption)
                     TextField("Eight uppercase hex pairing code", text: $collectorCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
                         .onChange(of: collectorCode) { _, _ in collectorConsent = false }
                     ForEach(model.slots) { slot in
@@ -685,6 +773,12 @@ struct CloudView: View {
                 Button("Delete cloud account and data", role: .destructive) { confirmDelete = true }
             }
         }.navigationTitle("Optional cloud")
+            .onChange(of: model.session?.token) { _, _ in
+                selectedSlots = []; collectorConsent = false; collectorCode = ""
+            }
+            .onChange(of: model.slots.map(\.id)) { _, ids in
+                selectedSlots.formIntersection(Set(ids)); collectorConsent = false
+            }
             .confirmationDialog("Permanently erase cloud account, quota and all sessions?", isPresented: $confirmDelete) {
                 Button("Erase account", role: .destructive) { Task { await model.disconnect(delete: true) } }
             }

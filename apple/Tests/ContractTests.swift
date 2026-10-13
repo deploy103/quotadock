@@ -86,13 +86,84 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers.count, 1)
     }
 
-    func testCollectorApprovalRequiresMatchingDistinctProviderSlotsAndExactCode() {
+    func testRefreshBatchPreservesSubsetAndEnforcesOwnershipAndFiftyLimit() {
+        let slots = (0..<61).map { _ in CloudAccount(id: UUID(), provider: .codex) }
+        var batch = CloudBatchSelection()
+        batch.reconcile(slots: slots)
+        XCTAssertEqual(batch.ids, Array(slots.prefix(50).map(\.id)))
+        let subset = [slots[3].id, slots[27].id, slots[60].id]
+        XCTAssertTrue(batch.select(subset, slots: slots))
+        batch.reconcile(slots: Array(slots.reversed()))
+        XCTAssertEqual(batch.ids, subset)
+        for invalid in [Array(slots.prefix(51).map(\.id)), [slots[3].id, slots[3].id], [slots[3].id, UUID()]] {
+            XCTAssertFalse(CloudBatchSelection.valid(invalid, slots: slots))
+            XCTAssertFalse(batch.select(invalid, slots: slots))
+            XCTAssertEqual(batch.ids, subset)
+        }
+        XCTAssertTrue(CloudBatchSelection.valid(Array(slots.prefix(50).map(\.id)), slots: slots))
+        batch.reconcile(slots: slots.filter { $0.id != slots[27].id })
+        XCTAssertEqual(batch.ids, [slots[3].id, slots[60].id])
+        XCTAssertTrue(batch.select([], slots: slots))
+        batch.reconcile(slots: slots)
+        XCTAssertTrue(batch.ids.isEmpty) // An explicit empty selection is not silently refilled.
+        XCTAssertFalse(CloudBatchSelection.valid(batch.ids, slots: slots))
+        XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: Set(slots.prefix(51).map(\.id)), slots: slots))
+    }
+
+    @MainActor
+    func testLiveAcceptsSelectedSubsetAndRestoresDifferentServerSubset() throws {
+        let model = CloudModel()
+        model.foreground = false // No network work is scheduled by this contract test.
+        let slots = (0..<60).map { _ in CloudAccount(id: UUID(), provider: .codex) }
+        model.slots = slots
+        let selected = [slots[4].id, slots[58].id]
+        model.selectRefreshSlots(selected)
+        let json = """
+        {"tier":"pro","limits":{"accounts":null,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
+        """
+        model.me = try CloudMe.decode(Data(json.utf8))
+        model.startLive()
+        XCTAssertTrue(model.liveEnabled) // More than 50 registrations do not block a small batch.
+        model.clear()
+        model.slots = slots
+        model.selectRefreshSlots(selected)
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        root["liveSession"] = ["accountIds": [slots[22].id.uuidString],
+                               "startedAt": "2099-01-01T00:00:00.000Z", "deadline": "2099-01-01T00:30:00.000Z"]
+        model.me = try CloudMe.decode(JSONSerialization.data(withJSONObject: root))
+        XCTAssertTrue(model.selectionLocked)
+        model.selectRefreshSlots([slots[1].id])
+        XCTAssertEqual(model.refreshSelection.ids, selected)
+        model.startLive()
+        XCTAssertTrue(model.liveEnabled) // Restore need not equal every registration or the UI selection.
+        XCTAssertEqual(model.liveDeadline, model.me?.liveSession?.deadlineDate)
+        model.clear()
+    }
+
+    @MainActor
+    func testCloudModelSelectionSurvivesReadsAndClearsOnLogout() {
+        let model = CloudModel()
+        let slots = (0..<60).map { _ in CloudAccount(id: UUID(), provider: .claude) }
+        model.slots = slots
+        model.selectRefreshSlots([slots[9].id, slots[59].id])
+        model.slots = Array(slots.reversed())
+        XCTAssertEqual(model.refreshSelection.ids, [slots[9].id, slots[59].id])
+        model.liveEnabled = true
+        model.selectRefreshSlots([slots[1].id])
+        XCTAssertEqual(model.refreshSelection.ids, [slots[9].id, slots[59].id])
+        model.clear()
+        XCTAssertTrue(model.refreshSelection.ids.isEmpty)
+        model.slots = [slots[1]]
+        XCTAssertEqual(model.refreshSelection.ids, [slots[1].id])
+    }
+
+    func testCollectorApprovalRequiresOwnedSlotsAndExactCode() {
         let first = CloudAccount(id: UUID(), provider: .codex)
         let duplicate = CloudAccount(id: UUID(), provider: .codex)
         let other = CloudAccount(id: UUID(), provider: .claude)
         let slots = [first, duplicate, other]
         XCTAssertTrue(CollectorApproval.valid(code: "AB0123EF", selected: [first.id, other.id], slots: slots))
-        XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [first.id, duplicate.id], slots: slots))
+        XCTAssertTrue(CollectorApproval.valid(code: "AB0123EF", selected: [first.id, duplicate.id], slots: slots))
         XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [UUID()], slots: slots))
         XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [], slots: slots))
         for code in ["ab0123ef", "AB0123EG", " AB0123EF", "AB0123E", "ＡＢ0123EF"] {

@@ -2,14 +2,14 @@
 
 **Your AI allowance, at a glance — on iPhone, Apple Watch, and widgets.**
 
-[![Apple simulator build](https://img.shields.io/badge/Apple_simulator_build-verified-brightgreen)](https://github.com/deploy103/quotadock/actions/runs/38420208680)
+[![CI](https://github.com/quotadock-dev/quotadock/actions/workflows/ci.yml/badge.svg)](https://github.com/quotadock-dev/quotadock/actions)
 ![Source preview](https://img.shields.io/badge/v0.1.0-source_preview-orange)
 ![Node](https://img.shields.io/badge/Node.js-22-43853d)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 QuotaDock turns the output of your **installed [CodexBar](https://github.com/steipete/CodexBar) CLI** into a small, authenticated snapshot. Provider credentials stay on the host. Clients receive remaining allowance, reset information, and freshness — not account identities.
 
-> **v0.1.0 SOURCE PREVIEW.** Source builds only: no App Store, TestFlight, signed installer, or production-readiness claim. The GitHub destination is `deploy103/quotadock`. Provider availability depends on CodexBar and your account.
+> **v0.1.0 SOURCE PREVIEW.** No App Store, TestFlight, signed installer, or production-readiness claim. [App + collector](https://github.com/quotadock-dev/quotadock) and [website](https://github.com/quotadock-dev/quotadock-web) are public; server implementation is private. Provider availability depends on CodexBar and your account. Cloud sign-in and purchases remain gated on Apple configuration and trusted HTTPS.
 
 ![QuotaDock desktop web dashboard — demo data, not native iOS](docs/assets/dashboard-desktop.png)
 
@@ -52,7 +52,7 @@ The zero-dependency bridge invokes fixed CodexBar commands, caches results for 6
 | Surface | Requirements | Preview status / limits |
 | --- | --- | --- |
 | Bridge | Node.js 22; installed CodexBar for live data | Local source CLI; demo needs no provider login |
-| Web | Modern browser on bridge host | Loopback HTTP; not a public hosted service |
+| Web dashboard | Modern browser on bridge host | Local paired dashboard; separate public website is a labelled static demo |
 | iPhone | iOS 17+, Mac with Xcode 16+ to build | Source only; real device requires trusted HTTPS |
 | iOS widgets | iOS 17+, installed native app | OS-scheduled updates; not live counters |
 | Apple Watch / widgets | watchOS 10+, paired iPhone | Cached sanitized snapshots; not direct provider login |
@@ -66,12 +66,54 @@ The zero-dependency bridge invokes fixed CodexBar commands, caches results for 6
 
 Unknown values stay unknown (`null`), never synthetic zero. Only a measured zero means exhausted. Windows must not be summed. Reset times are information, not a promise of quota replenishment.
 
+OpenAI's [current Codex plan guide](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan) includes Free/Go, while its [pricing guide](https://learn.chatgpt.com/docs/pricing) notes surface/rollout restrictions. **Free is not automatically rejected.** Missing account eligibility or an unmeasurable quota remains Unknown; this app cannot infer eligibility from a failed lookup. Checked 2026-10-13; no real Free account test was performed.
+
+## Optional cloud · credentials stay local
+
+The iPhone uses nonce-bound **Sign in with Apple**, without email/name scopes.
+It creates provider slots and approves a short-lived collector pairing code.
+The computer receives a **separate scoped 30-day grant**, never the phone's Apple
+session. See [collector setup](bridge/cloud.md) and [native setup](apple/README.md).
+
+The computer must remain online with its local provider sessions. It polls for
+phone jobs approximately every 20 seconds and checks due automatic collection
+approximately every 20 minutes. The server enforces the tier interval using the
+last successful **source observation**, not the cache-read time. Automatic local
+collection defaults on and can be disabled independently of app-open refresh.
+An offline collector cannot produce fresh usage, even while the server is online.
+
+| Planned tier | Slots | Due interval | Early manual refresh | Live sessions |
+|---|---:|---|---|---|
+| Free | 3 | 120 min | 10 successful batches/KST day | — |
+| Plus | 10 | 60 min | Unlimited, server spacing applies | 5/verified subscription period |
+| Pro | Unlimited registration | 20/30/60/120 min | Unlimited, server spacing applies | 5/KST day |
+
+Server policies are implemented; **purchases are not available in this app**.
+Plus targets ₩3,990/month; Pro price is undecided. Live explicitly opts into
+foreground requests at a target 60-second spacing for a server-owned 30-minute
+session. Hidden/locked apps pause requests without extending that deadline.
+Failed first collection, cached reads and duplicate completion do not spend a
+refresh allowance. These allowances do not buy extra AI-provider quota.
+
+The collector supports explicit durable-key mapping for independently configured
+Claude/Codex/Grok accounts; Gemini remains one local account. Older CodexBar builds
+without account keys cannot silently reuse the active login. The phone selects
+up to 50 slots per refresh/Live batch, independently of registration count.
+Watch/widgets still show only the first server-listed slot per provider, not
+account totals. Real-provider multi-account validation remains a release gate.
+
+The server stores sanitized quota **and pseudonymous identity, hashed sessions,
+collector grants, consent, billing/transaction IDs and counters**. A database leak
+would include that metadata, not just quota. Provider passwords/tokens, email,
+names, raw diagnostics and Apple JWTs are not stored. Deletion revokes owned
+sessions/grants and cascades owned records; backups have separate expiry.
+
 ## 빠른 시작 · Korean quickstart
 
 Node.js 22를 설치하고 저장소 루트에서 실행하세요. 브리지 자체에는 npm 의존성이 없습니다.
 
 ```sh
-git clone https://github.com/deploy103/quotadock.git
+git clone https://github.com/quotadock-dev/quotadock.git
 cd quotadock
 node bridge/cli.mjs init
 node bridge/cli.mjs status --demo
@@ -113,13 +155,13 @@ Both TLS settings are required for non-loopback binding. Use private networking 
 2. From `apple/`, run `xcodegen generate` using `project.yml`, then open the generated `.xcodeproj` in Xcode.
 3. Select the iOS app scheme and an iOS 17+ simulator. Simulator builds can be unsigned; physical devices require your development team and signing setup.
 4. For devices, configure the bundle prefix (`com.quotadock.app` by default), App Group (`group.com.quotadock.app`), and shared Keychain access group consistently across targets. Configure signing locally; never commit signing credentials.
-5. In the app, pair with your private HTTPS bridge and its token. The token belongs in Keychain, including shared widget access; sanitized snapshots belong in the App Group cache.
+5. In the app, pair with your private HTTPS bridge and its token. Tokens belong in iPhone-only Keychain; widgets read only sanitized App Group cache, never tokens.
 6. Add **All AI allowances** for the four-provider overview, or individual provider widgets from the Home Screen / Today View gallery. Add rectangular/circular/inline widgets on the Lock Screen. Install the companion Watch app on a paired watch and add its widget/complication where supported.
 
 Provider icons are MIT-licensed Lobe Icons assets with provenance and trademark
 notices in [third-party notices](THIRD_PARTY_NOTICES.md). Xcode 16.4 simulator
-builds pass for the iPhone, Watch and widget targets; six native contract tests
-pass on an iPhone simulator. The native demo screenshot above was inspected.
+builds and native contract tests are tracked by the CI badge. Screenshots are
+demo renders, not real-provider or physical-device proof.
 Physical-device signing, pairing and system widget layouts remain unverified;
 see [native verification limits](apple/README.md).
 
