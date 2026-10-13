@@ -11,7 +11,7 @@ struct ProviderWidgetContent: View {
 
     private var provider: Provider? { snapshot?.providers.first { $0.id == providerID } }
     private var window: QuotaWindow? { provider?.displayWindows.first }
-    private var value: String { window?.clampedRemaining.map { "\(Int($0))%" } ?? "?" }
+    private var value: String { window?.remainingPercentText ?? "?" }
     private var demo: Bool { snapshot?.demo == true || provider?.source == .demo }
     private var freshness: String {
         guard let provider, let observed = provider.observedAt else { return "Not observed" }
@@ -82,7 +82,7 @@ struct WidgetQuotaBar: View {
             HStack(spacing: 4) {
                 Text(window.label).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(window.clampedRemaining.map { "\(Int($0))% left" } ?? "Unknown")
+                Text(window.remainingPercentText.map { "\($0) left" } ?? "Unknown")
                     .monospacedDigit().fixedSize()
             }.font(.caption)
             if let remaining = window.clampedRemaining {
@@ -125,7 +125,7 @@ struct OverviewWidgetContent: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    Text(window?.clampedRemaining.map { "\(Int($0))%" } ?? "Unknown")
+                    Text(window?.remainingPercentText ?? "Unknown")
                         .font(.caption2).monospacedDigit().fixedSize()
                 }.accessibilityElement(children: .combine)
             }

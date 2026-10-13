@@ -23,10 +23,7 @@ struct RemainingBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var remainingText: String {
-        guard let remaining = window.clampedRemaining else { return "Remaining unknown" }
-        // A positive fractional allowance must not read as an exhausted (zero) quota.
-        if remaining > 0 && remaining < 0.01 { return "<0.01% remaining" }
-        return "\(remaining.formatted(.number.precision(.fractionLength(0...2))))% remaining"
+        window.remainingPercentText.map { "\($0) remaining" } ?? "Remaining unknown"
     }
 
     private var stackedLabel: some View {

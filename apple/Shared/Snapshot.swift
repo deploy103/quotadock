@@ -150,4 +150,9 @@ struct QuotaWindow: Codable, Identifiable, Equatable {
     let remainingPercent: Double?
     let resetsAt: Date?
     var clampedRemaining: Double? { remainingPercent.map { min(100, max(0, $0)) } }
+    var remainingPercentText: String? {
+        guard let remaining = clampedRemaining else { return nil }
+        if remaining > 0 && remaining < 0.01 { return "<0.01%" }
+        return "\(remaining.formatted(.number.precision(.fractionLength(0...2))))%"
+    }
 }
