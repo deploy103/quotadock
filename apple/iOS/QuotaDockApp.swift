@@ -98,7 +98,8 @@ struct DockView: View {
     @State private var showSurfacePreview = false
     private var surfacePreview: String? {
         #if DEBUG
-        return ["widgets", "widgets-overview", "widgets-accessories", "watch", "watch-stale", "accessibility"].first {
+        return ["widgets", "widgets-overview", "widgets-accessories", "watch", "watch-stale", "accessibility",
+                "purchases", "purchases-unavailable", "purchases-pending", "purchases-error"].first {
             ProcessInfo.processInfo.arguments.contains("--\($0)-preview")
         }
         #else
@@ -151,6 +152,8 @@ struct DockView: View {
                     switch surfacePreview ?? "widgets" {
                     case "accessibility": QuotaAccessibilityPreview()
                     case "watch", "watch-stale": WatchSurfacePreview()
+                    case "purchases", "purchases-unavailable", "purchases-pending", "purchases-error":
+                        SubscriptionsPreview(state: surfacePreview ?? "purchases")
                     default: WidgetSurfacePreview()
                     }
                     #endif

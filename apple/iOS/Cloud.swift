@@ -9,6 +9,42 @@ struct CloudAccount: Decodable, Identifiable {
     let provider: ProviderID
 }
 
+struct CloudJob: Decodable {
+    enum Status: String, Decodable { case pending, cached, completed, expired }
+    enum Mode: String, Decodable { case auto, force, live }
+    let id: UUID
+    let status: Status
+    let mode: Mode
+    let accountIds: [UUID]
+    let expiresAt: String
+    let debited: Bool
+
+    static func decode(_ data: Data, requested: [UUID], mode: Mode, previous: Self? = nil) throws -> Self {
+        let job = try JSONDecoder().decode(Self.self, from: data)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fractional = formatter.date(from: job.expiresAt)
+        formatter.formatOptions = [.withInternetDateTime]
+        guard !requested.isEmpty, requested.count <= 50, Set(requested).count == requested.count,
+              job.mode == mode, job.accountIds.count <= 50,
+              Set(job.accountIds).count == job.accountIds.count,
+              Set(job.accountIds).isSubset(of: Set(requested)),
+              (fractional ?? formatter.date(from: job.expiresAt)) != nil,
+              !job.debited || job.status == .completed else { throw SnapshotError.invalid }
+        if mode != .auto {
+            guard Set(job.accountIds) == Set(requested) else { throw SnapshotError.invalid }
+        }
+        guard job.status == .cached ? job.accountIds.isEmpty : !job.accountIds.isEmpty else { throw SnapshotError.invalid }
+        if let previous {
+            guard job.id == previous.id, job.mode == previous.mode,
+                  Set(job.accountIds) == Set(previous.accountIds), job.expiresAt == previous.expiresAt else {
+                throw SnapshotError.invalid
+            }
+        }
+        return job
+    }
+}
+
 struct CloudMe: Decodable {
     enum Tier: String, Decodable { case free, plus, pro }
     struct LiveSession: Decodable {
@@ -38,6 +74,7 @@ struct CloudMe: Decodable {
     let liveSessionsLimit: Int
     let liveSession: LiveSession?
     let purchasesAvailable: Bool
+    let appAccountToken: UUID?
     static func decode(_ data: Data) throws -> Self {
         let value = try JSONDecoder().decode(Self.self, from: data)
         let intervals = value.tier == .free ? [120] : value.tier == .plus ? [60] : [20, 30, 60, 120]
@@ -47,7 +84,8 @@ struct CloudMe: Decodable {
               value.limits.live == (value.tier != .free),
               value.limits.earlyBatchesPerDay == (value.tier == .free ? 10 : nil),
               value.earlyBatchesUsed >= 0, value.liveSessionsUsed >= 0,
-              value.liveSessionsLimit == (value.tier == .free ? 0 : 5) else { throw SnapshotError.invalid }
+              value.liveSessionsLimit == (value.tier == .free ? 0 : 5),
+              !value.purchasesAvailable || value.appAccountToken != nil else { throw SnapshotError.invalid }
         if let live = value.liveSession {
             guard value.tier != .free, !live.accountIds.isEmpty, live.accountIds.count <= 50,
                   Set(live.accountIds).count == live.accountIds.count,
@@ -298,6 +336,7 @@ struct CloudClient {
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw SnapshotError.response }
         if response.statusCode == 404 { throw CloudHTTPError.notFound }
+        if response.statusCode == 401 { throw CloudHTTPError.unauthorized }
         guard (200..<300).contains(response.statusCode) else {
             throw SnapshotError.response
         }
@@ -312,7 +351,7 @@ struct CloudClient {
     }
 }
 
-enum CloudHTTPError: Error { case notFound }
+enum CloudHTTPError: Error { case notFound, unauthorized }
 
 final class CloudReadBudget {
     let deadline: TimeInterval
@@ -433,6 +472,7 @@ struct CloudPagination {
 
 @MainActor
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    let purchases = PurchasesModel()
     @Published var session = CloudSessionStore.load()
     @Published var snapshot = CloudSessionStore.load() == nil ? nil : CloudCache.load()
     @Published var slots: [CloudAccount] = [] {
@@ -547,6 +587,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                                         expiresAt: Date().addingTimeInterval(Double(min(login.expiresIn, 3600))))
                 onSwitch?()
                 try CloudSessionStore.save(next)
+                purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
                 liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil
                 liveSlotIDs = []; lastLiveRequest = nil; me = nil; slots = []
                 refreshSelection = CloudBatchSelection()
@@ -558,6 +599,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     func clear() {
         pollingTask?.cancel()
         requests.cancel()
+        purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
         liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil; me = nil; collectors = []
         liveSlotIDs = []; lastLiveRequest = nil
         busy = false
@@ -600,13 +642,25 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                 liveEnabled = false; liveTask?.cancel()
             }
             self.me = verified; collectors = paired?.collectors ?? []
+            purchases.configure(client: client, accountToken: verified.appAccountToken,
+                available: verified.purchasesAvailable && (session?.expiresAt ?? .distantPast) > Date()) { [weak self] in
+                guard let self, self.revision == current else { return }
+                await self.read(internalWork: true)
+            }
             reconcileLive(verified: verified)
             CloudCache.save(next)
             budget = verified.budget
             if !verified.limits.live { liveEnabled = false; liveTask?.cancel() }
             onSnapshot?(next.smallSurfaceSnapshot)
             status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
-        } catch { if current == revision { status = "Cloud read unavailable or session expired. Original observations retained; sign in again if needed." } }
+        } catch {
+            if current == revision {
+                if case CloudHTTPError.unauthorized = error {
+                    purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
+                }
+                status = "Cloud read unavailable or session expired. Original observations retained; sign in again if needed."
+            }
+        }
     }
     func mutate(path: String, method: String, body: [String: Any] = [:]) async {
         guard let client, !busy, !reading, !liveEnabled else { return }
@@ -639,19 +693,24 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         defer { if current == revision { busy = false } }
         do {
             if live { lastLiveRequest = Date() }
+            let mode: CloudJob.Mode = live ? .live : force ? .force : .auto
             let data = try await client.request("v2/refresh", method: "POST", body: [
-                "accountIds": ids.map(\.uuidString), "mode": live ? "live" : force ? "force" : "auto",
+                "accountIds": ids.map(\.uuidString), "mode": mode.rawValue,
                 "idempotencyKey": UUID().uuidString])
-            let job = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let job = try CloudJob.decode(data, requested: ids, mode: mode)
             guard current == revision, foreground, !Task.isCancelled else { return }
-            await read(internalWork: true)
-            guard current == revision, foreground else { return }
-            if job?["status"] as? String == "pending" {
+            if job.status == .pending {
                 status = "Waiting for local collector — quota has not been updated."
-                let task = Task { await poll(client: client, current: current, live: live) }
+                let task = Task { await poll(client: client, current: current, job: job, requested: ids) }
                 pollingTask = task
                 await task.value
                 if current == revision { pollingTask = nil }
+            } else {
+                await read(internalWork: true)
+                guard current == revision, foreground else { return }
+                status = job.status == .cached ? "No selected slots were due. Showing original observations." :
+                    job.status == .expired ? "Collector job expired. Original observations retained." :
+                    "Collector processing completed; this does not guarantee fresh quota. Check observation time and collection warnings."
             }
         } catch { if current == revision { status = "Refresh unavailable. Old observations retained; verified tier limits or collector availability may apply." } }
     }
@@ -731,11 +790,10 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         liveDeadline = active.deadlineDate
     }
 
-    private func poll(client: CloudClient, current: Int, live: Bool) async {
+    private func poll(client: CloudClient, current: Int, job: CloudJob, requested: [UUID]) async {
         // Cancellation on leaving foreground cancels sleeps and URLSession async requests.
         let operation = CloudReadBudget()
         let deadline = operation.deadline
-        let original = snapshot?.accounts.map(\.observedAt)
         do {
             for _ in 0..<12 {
                 let wait = min(5, deadline - ProcessInfo.processInfo.systemUptime)
@@ -748,27 +806,18 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                     guard foreground, current == revision, session != nil else { throw CancellationError() }
                     return try await operation.fetch(path, client: client)
                 }
-                let next = try await CloudPagination.snapshot(slots: slots, fetch: fetch)
+                let result = try CloudJob.decode(try await fetch("v2/jobs/\(job.id.uuidString)"),
+                    requested: requested, mode: job.mode, previous: job)
                 try Task.checkCancellation()
                 guard foreground, current == revision, session != nil else { return }
-                snapshot = next; CloudCache.save(next); onSnapshot?(next.smallSurfaceSnapshot)
-                if next.accounts.map(\.observedAt) != original {
-                    if live, liveDeadline == nil {
-                        let verified = try CloudMe.decode(try await fetch("v2/me"))
-                        guard current == revision, foreground, !Task.isCancelled else { return }
-                        me = verified; budget = verified.budget
-                        reconcileLive(verified: verified)
-                        if liveDeadline == nil {
-                            // Do not keep issuing requests that might silently start a new session.
-                            liveEnabled = false
-                            status = "Live success/deadline cannot be confirmed. Checks paused; server owns session accounting. Stop before a new session."
-                            return
-                        }
-                    }
-                    status = "New collector observation received. See original observation time."
+                if result.status != .pending {
+                    await read(internalWork: true)
+                    guard current == revision, foreground, !Task.isCancelled else { return }
+                    status = result.status == .expired ? "Collector job expired. Original observations retained." :
+                        "Collector processing completed; this does not guarantee fresh quota. Check observation time and collection warnings."
                     return
                 }
-                status = "Collector requested; showing cached observations. Polling ends after 60 seconds."
+                status = "This collector job is pending; showing cached observations. Waiting ends after 60 seconds."
             }
             status = "Collector wait timed out. Cached observations retained; retry later."
         } catch {
@@ -863,7 +912,7 @@ struct CloudView: View {
                 Text("Only connect to a server you trust. The server stores sanitized quota, a pseudonymous Apple account, sessions and refresh counters — not provider credentials. A local collector processes quota for your slots. You can instead use Pair bridge without cloud.")
                 Toggle("Store sanitized quota and account metadata", isOn: $quotaStorageConsent)
                 Toggle("Allow local collector quota processing", isOn: $collectorProcessingConsent)
-                Text("Both consents are required for cloud. Purchases are unavailable in this preview.").font(.caption).foregroundStyle(.secondary)
+                Text("Both consents are required for cloud. Purchases require configured Apple products and server verification.").font(.caption).foregroundStyle(.secondary)
                 Button("Connect with Apple") {
                     let trustedBase = base
                     let storage = quotaStorageConsent
@@ -875,8 +924,7 @@ struct CloudView: View {
                 if model.snapshot?.cachedSubset == true {
                     Text("Offline cache: first 50 slots only, not the complete account list. Read the server for all slots.").font(.caption)
                 }
-                Text("Local collector required. No provider login or purchases on this phone.")
-                Text("Purchases unavailable in this app: Apple products and signing configuration are not ready. Only server-verified entitlements apply.").font(.caption)
+                Text("Local collector required. Provider credentials remain on your computer.")
                 if let me = model.me {
                     Toggle("Local collector automatic updates", isOn: Binding(get: { model.me?.backgroundCollection ?? true }, set: { enabled in
                         Task { await model.mutate(path: "v2/settings", method: "PUT", body: ["autoMinutes": me.autoMinutes, "backgroundCollection": enabled]) }
@@ -895,7 +943,7 @@ struct CloudView: View {
                             .disabled(model.busy || model.liveEnabled || model.slots.isEmpty)
                         Button("Stop Live session") { Task { await model.stopLive() } }
                         if let deadline = model.liveDeadline { Text("Live ends: \(deadline.formatted())").font(.caption) }
-                    } else { Text("Live requires a verified paid entitlement. Purchases are unavailable here.").font(.caption) }
+                    } else { Text("Live requires a server-verified paid entitlement.").font(.caption) }
                 }
                 Picker("New slot", selection: $provider) {
                     ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.self) { Text($0.displayName).tag($0) }
@@ -946,6 +994,7 @@ struct CloudView: View {
                 Button("Log out", role: .destructive) { Task { await model.disconnect(delete: false) } }
                 Button("Delete cloud account and data", role: .destructive) { confirmDelete = true }
             }
+            SubscriptionsView(store: model.purchases)
         }.navigationTitle("Optional cloud")
             .onChange(of: base) { _, _ in
                 quotaStorageConsent = false; collectorProcessingConsent = false

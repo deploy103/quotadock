@@ -57,6 +57,12 @@ final class ContractTests: XCTestCase {
             XCTAssertFalse(me.purchasesAvailable)
             XCTAssertTrue(me.budget.contains(tier.capitalized))
             XCTAssertFalse(me.budget.contains("never display"))
+            let enabled = json.replacingOccurrences(of: "\"purchasesAvailable\":false", with: "\"purchasesAvailable\":true")
+            XCTAssertThrowsError(try CloudMe.decode(Data(enabled.utf8)))
+            let bound = enabled.replacingOccurrences(of: "\"identity\":\"never display\"", with:
+                "\"appAccountToken\":\"33333333-3333-4333-8333-333333333333\"")
+            XCTAssertEqual(try CloudMe.decode(Data(bound.utf8)).appAccountToken,
+                UUID(uuidString: "33333333-3333-4333-8333-333333333333"))
             XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"earlyBatchesUsed\":2", with: "\"earlyBatchesUsed\":-1").utf8)))
             XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"tier\":\"\(tier)\"", with: "\"tier\":\"clientPaid\"").utf8)))
             XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"autoMinutes\":\(minutes)", with: "\"autoMinutes\":7").utf8)))
@@ -71,6 +77,32 @@ final class ContractTests: XCTestCase {
                 XCTAssertEqual(resumed.liveSession?.deadlineDate, Date(timeIntervalSince1970: 1791887400))
             }
         }
+    }
+
+    func testRefreshTracksItsExactJobAndTerminalDoesNotRequireNewObservation() throws {
+        let id = "44444444-4444-4444-8444-444444444444"
+        let account = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let other = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let pending = """
+        {"id":"\(id)","status":"pending","mode":"auto","accountIds":["\(account.uuidString)"],"expiresAt":"2026-10-13T10:05:00.000Z","debited":false}
+        """
+        let issued = try CloudJob.decode(Data(pending.utf8), requested: [account, other], mode: .auto)
+        // Auto targets only due slots. A failed completion has no new observation or debit.
+        let completed = pending.replacingOccurrences(of: "pending", with: "completed")
+        XCTAssertEqual(try CloudJob.decode(Data(completed.utf8), requested: [account, other], mode: .auto, previous: issued).status, .completed)
+        for invalid in [pending.replacingOccurrences(of: id, with: UUID().uuidString),
+                        pending.replacingOccurrences(of: account.uuidString, with: other.uuidString),
+                        pending.replacingOccurrences(of: "10:05:00", with: "10:06:00"),
+                        pending.replacingOccurrences(of: "\"debited\":false", with: "\"debited\":true"),
+                        pending.replacingOccurrences(of: "pending", with: "unknown")] {
+            XCTAssertThrowsError(try CloudJob.decode(Data(invalid.utf8), requested: [account, other], mode: .auto, previous: issued))
+        }
+        XCTAssertThrowsError(try CloudJob.decode(Data(pending.utf8), requested: [other], mode: .auto))
+        XCTAssertThrowsError(try CloudJob.decode(Data(pending.replacingOccurrences(of: "auto", with: "force").utf8), requested: [account, other], mode: .force))
+        let cached = pending.replacingOccurrences(of: "pending", with: "cached")
+            .replacingOccurrences(of: "[\"\(account.uuidString)\"]", with: "[]")
+        XCTAssertEqual(try CloudJob.decode(Data(cached.utf8), requested: [account, other], mode: .auto).status, .cached)
+        XCTAssertThrowsError(try CloudJob.decode(Data(pending.replacingOccurrences(of: "pending", with: "cached").utf8), requested: [account], mode: .auto))
     }
 
     func testCloudSnapshotAllowsMoreThanFreeRegistrationCap() throws {

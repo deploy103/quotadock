@@ -15,6 +15,9 @@ imply a signed binary release or App Store availability.
 - Shared widget/Watch freshness and empty-cache presentation, plus large-text layouts.
 - Fractional remaining allowances stay distinct from zero on every native surface.
 - Read-only collector diagnostics with fixed non-secret errors.
+- Refresh waits on the submitted server job ID; completed processing never promises fresh quota.
+- Native StoreKit purchase/restore source with account binding and server-accepted delivery; pilot sales remain disabled.
+- Explicit release acceptance gates for identity, purchases, provider collection and physical-device surfaces.
 
 No App Store/TestFlight distribution, real-time background refresh guarantee,
 or account-independent provider availability is promised.

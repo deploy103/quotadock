@@ -47,11 +47,11 @@ Bridge runs fixed `codexbar usage --provider <id> --format json --json-only`
 commands; caches snapshots for 60 seconds; GET does not always mean a new
 provider request. Optional `QUOTADOCK_POLL_SECONDS` (minimum 60) refreshes
 while the process runs. The iPhone pulls on foreground/manual refresh;
-WidgetKit also pulls over HTTPS subject to OS scheduling. Watch receives
+WidgetKit reads sanitized local cache subject to OS scheduling. Watch receives
 sanitized snapshots using WatchConnectivity. No push notification promise.
 
 Apple targets: iOS 17+, watchOS 10+, Xcode 16+. Bundle prefix
 `com.quotadock.app`, app group `group.com.quotadock.app`; configurable via
-XcodeGen project settings. Store bridge token only in Keychain, shared with
-iOS widget via Keychain access group. Cache sanitized snapshot in App Group.
+XcodeGen project settings. Store bridge token only in iPhone Keychain;
+widgets have no token or Keychain entitlement. Cache sanitized snapshot in App Group.
 Never send the token to Watch. Watch widgets read its local cached snapshot.

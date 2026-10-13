@@ -88,12 +88,19 @@ An offline collector cannot produce fresh usage, even while the server is online
 | Plus | 10 | 60 min | Unlimited, server spacing applies | 5/verified subscription period |
 | Pro | Unlimited registration | 20/30/60/120 min | Unlimited, server spacing applies | 5/KST day |
 
-Server policies are implemented; **purchases are not available in this app**.
+Server policies and native StoreKit purchase/restore source are implemented;
+**purchases remain disabled on the unconfigured pilot**. Product/signature/account
+checks precede server verification; only the server's authoritative account read
+applies a tier. Failed new deliveries remain unfinished for reconnect/Restore.
 Plus targets ₩3,990/month; Pro price is undecided. Live explicitly opts into
 foreground requests at a target 60-second spacing for a server-owned 30-minute
 session. Hidden/locked apps pause requests without extending that deadline.
 Failed first collection, cached reads and duplicate completion do not spend a
 refresh allowance. These allowances do not buy extra AI-provider quota.
+The phone now waits on its specific server job ID, not changing quota timestamps.
+Terminal processing can include collection failure and never guarantees fresh
+quota. See the [release plan and failure contracts](docs/release-plan.md) for
+purchase, cancellation, ownership, offline and signed-device acceptance gates.
 
 The collector supports explicit durable-key mapping for independently configured
 Claude/Codex/Grok accounts; Gemini remains one local account. Older CodexBar builds
