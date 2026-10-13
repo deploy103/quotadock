@@ -2,7 +2,7 @@
 
 **Your AI allowance, at a glance — on iPhone, Apple Watch, and widgets.**
 
-![Apple build](https://img.shields.io/badge/Apple_build-unverified-orange)
+[![Apple simulator build](https://img.shields.io/badge/Apple_simulator_build-verified-brightgreen)](https://github.com/deploy103/quotadock/actions/runs/38420208680)
 ![Source preview](https://img.shields.io/badge/v0.1.0-source_preview-orange)
 ![Node](https://img.shields.io/badge/Node.js-22-43853d)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -16,6 +16,11 @@ QuotaDock turns the output of your **installed [CodexBar](https://github.com/ste
 <details>
 <summary>Mobile web demo (Chromium touch emulation, not native iOS)</summary>
 <img src="docs/assets/dashboard-mobile.png" alt="Mobile web demo with AI icons and remaining allowance bars" width="390" />
+</details>
+
+<details>
+<summary>Native iPhone demo (Xcode 16.4 simulator, sample data)</summary>
+<img src="docs/assets/native-demo.png" alt="Native QuotaDock app with provider icons, plans, remaining bars and explicit unknown readings" width="390" />
 </details>
 
 ## How it works
@@ -112,8 +117,11 @@ Both TLS settings are required for non-loopback binding. Use private networking 
 6. Add **All AI allowances** for the four-provider overview, or individual provider widgets from the Home Screen / Today View gallery. Add rectangular/circular/inline widgets on the Lock Screen. Install the companion Watch app on a paired watch and add its widget/complication where supported.
 
 Provider icons are MIT-licensed Lobe Icons assets with provenance and trademark
-notices in [third-party notices](THIRD_PARTY_NOTICES.md). Native source is not
-yet built or visually verified on Apple SDKs; see [native verification limits](apple/README.md).
+notices in [third-party notices](THIRD_PARTY_NOTICES.md). Xcode 16.4 simulator
+builds pass for the iPhone, Watch and widget targets; six native contract tests
+pass on an iPhone simulator. The native demo screenshot above was inspected.
+Physical-device signing, pairing and system widget layouts remain unverified;
+see [native verification limits](apple/README.md).
 
 Watch receives snapshots through WatchConnectivity, **never the bridge token**. Watch widgets read the Watch's local cache. Use Xcode's scheme list as the source of truth for actual generated target names.
 
