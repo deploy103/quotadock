@@ -62,9 +62,15 @@ rejected. Observation timestamps never stand in for job identity.
    (including refund/revocation) for another pass. Logout/server/session/account
    changes invalidate completions and clear queued receipts/products.
 8. Network/server failure leaves delivery unconfirmed for reconnect/Restore;
-   new unfinished transactions are not finished. Different-cloud-account purchases are refused, not silently
-   transferred. Account erasure does not cancel Apple's subscription; link to
+   new unfinished transactions are not finished. Different-cloud-account purchases
+   are refused, not silently transferred. Account erasure does not cancel Apple's subscription; link to
    Apple's subscription management and explain this before purchase/erasure.
+
+Account erasure followed by a new cloud registration creates a new UUID. The
+current implementation consequently refuses an old subscription's account token,
+even for the same Apple sign-in. Define and validate an authenticated recovery
+policy before opening sales; never bypass ownership or retain erased identity
+records silently to make Restore appear successful.
 
 ## Release sequence and required evidence
 
@@ -74,7 +80,7 @@ rejected. Observation timestamps never stand in for job identity.
 | Private pilot | New API healthy, unauthorized requests refused, resource caps preserved; no unrelated services changed | Dedicated VM; public DNS/TLS absent |
 | Identity/device | Valid HTTPS; signed iPhone Apple nonce login, expiry, logout and erasure; no credentials in shared caches | Apple Team/provisioning and owner DNS |
 | Provider collection | Actual owned CLI slots; fresh/null/error/stale readings, offline collector and independent account mapping | Real accounts not exercised |
-| StoreKit sandbox | Buy/cancel/Ask to Buy/restore/reinstall, failed delivery retry, renewal/refund/revocation, newer update during delivery, account switch and ownership conflict | App Store products, roots and sandbox configuration |
+| StoreKit sandbox | Buy/cancel/Ask to Buy/restore/reinstall, failed delivery retry, renewal/refund/revocation, newer update during delivery, account switch, ownership conflict and deleted-account recreation | App Store products, roots, sandbox configuration and recovery policy |
 | Small surfaces | Real Home/Today/Lock widgets and paired Watch, cache deletion/offline/stale and large text | Physical-device run |
 | Release operations | User-data backup/restore, deletion/retention, privacy/EULA reachable over HTTPS, independent security review and load budget | Not production-ready |
 

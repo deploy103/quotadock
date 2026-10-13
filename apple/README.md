@@ -81,7 +81,18 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 - `iOS/`, `Watch/`, `Widgets/`: small native surfaces and timeline adapters.
 - `Tests/ContractTests.swift`: public model decode/encode, nullable values, clamps, staleness, demo, schema/date/size rejection, URL restrictions, request authorization and response sanitization/status tests using URLProtocol (no real credentials or server).
 
-The [current CI run](https://github.com/quotadock-dev/quotadock/actions/runs/38460764173) generated the project with XcodeGen, built iPhone/Watch/WidgetKit, and passed 29 native XCTests on an iPhone simulator, plus 18 bridge/web and 10 imported skill tests on Node 22. Twelve captures were inspected: default, dark, unknown, settings, separate cloud consents, distinct-slot batch selection, individual/overview/accessory widget hosts, empty/stale Watch hosts and large Dynamic Type. Visual inspection caught and resolved preview-routing and truncated widget-footer defects after an earlier passing test run. The large-text capture verifies visible long labels, 0% and 0.75%; its lower content remains offscreen. The [native demo](../docs/assets/native-demo.png) is from this run. Screenshots show scrollable app content and shared-component hosts, not system widgets or a physical Watch.
+The [prior CI run](https://github.com/quotadock-dev/quotadock/actions/runs/38460764173) generated the project with XcodeGen, built iPhone/Watch/WidgetKit, and passed 29 native XCTests on an iPhone simulator, plus 18 bridge/web and 10 imported skill tests on Node 22. Twelve captures were inspected: default, dark, unknown, settings, separate cloud consents, distinct-slot batch selection, individual/overview/accessory widget hosts, empty/stale Watch hosts and large Dynamic Type. Visual inspection caught and resolved preview-routing and truncated widget-footer defects after an earlier passing test run. The large-text capture verifies visible long labels, 0% and 0.75%; its lower content remains offscreen. The [native demo](../docs/assets/native-demo.png) is from this run. Screenshots show scrollable app content and shared-component hosts, not system widgets or a physical Watch.
+
+The [purchase/job-status integration CI](https://github.com/quotadock-dev/quotadock/actions/runs/38469463457)
+passed 34 native tests, iPhone/Watch/WidgetKit builds, 18 bridge/web tests and
+10 imported skill tests. Sixteen captures were generated; five affected captures
+were inspected: cloud consents and subscription unavailable/catalogue/verifying/
+failure. An earlier passing run exposed globally disabled preview links and
+ambiguous billing text; these were fixed and recaptured. This validates compilation,
+contract guards and presentation, **not real StoreKit purchases or event delivery**.
+Purchase samples use inert callbacks and display-only prices, never real products
+or credentials. `--purchases-preview`, `--purchases-unavailable-preview`,
+`--purchases-pending-preview` and `--purchases-error-preview` render those samples.
 
 This is not physical-device validation. On a Mac, inspect embedding/signing in Xcode and test Keychain sharing, first-unlock fallback, Home/Today/Lock Screen layout, Watch pairing/transfer, complications and stale/offline readings. Small accessory layouts are deliberately terse; large Dynamic Type, long tier/plan labels and system widget rendering require device visual review. Unit tests do not establish real TLS, Keychain provisioning or WatchConnectivity delivery.
 
