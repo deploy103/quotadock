@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { collectAccounts, listAccounts, validateBindings } from './collector.mjs';
 import { providers } from './snapshot.mjs';
 
@@ -39,10 +40,11 @@ export function api(base, path, token, body) {
     req.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
-async function privateDirectory(file) {
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+async function privateDirectory(file, create = true) {
+  if (typeof process.getuid !== 'function' || !constants.O_NOFOLLOW) throw Error('permissions');
+  if (create) await mkdir(dirname(file), { recursive: true, mode: 0o700 });
   const s = await lstat(dirname(file));
-  if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== process.getuid?.() || (s.mode & 0o077)) throw Error('configuration');
+  if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== process.getuid() || (s.mode & 0o077)) throw Error('permissions');
 }
 async function save(file, data) {
   await privateDirectory(file);
@@ -50,21 +52,74 @@ async function save(file, data) {
   try { await fd.writeFile(JSON.stringify(data)); await fd.sync(); } finally { await fd.close(); }
 }
 async function loadJSON(file) {
-  await privateDirectory(file);
-  const fd = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  await privateDirectory(file, false);
+  // Nonblocking open prevents a substituted FIFO from hanging diagnostics;
+  // the descriptor's regular-file/owner checks remain authoritative.
+  const fd = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const s = await fd.stat();
-    if (!s.isFile() || s.uid !== process.getuid?.() || (s.mode & 0o077) || s.size > 16384) throw Error('configuration');
+    if (!s.isFile() || s.uid !== process.getuid() || (s.mode & 0o077)) throw Error('permissions');
+    if (s.size > 16384) throw Error('configuration');
     return JSON.parse(await fd.readFile('utf8'));
   } finally { await fd.close(); }
 }
 async function load(file) {
   const c = await loadJSON(file);
-  if (!credential.test(c.collectorToken) || !Number.isFinite(c.expiresAt) || c.expiresAt <= Date.now()) throw Error('revoked');
-  return { base: origin(c.base), collectorToken: c.collectorToken, accounts: accounts(c.accounts) };
+  if (!c || !credential.test(c.collectorToken) || !Number.isFinite(c.expiresAt)) throw Error('configuration');
+  if (c.expiresAt <= Date.now()) throw Error('grant_expired');
+  return { base: origin(c.base), collectorToken: c.collectorToken, expiresAt: c.expiresAt, accounts: accounts(c.accounts) };
 }
 async function loadBindings(file) {
   try { return await loadJSON(file); } catch (e) { if (e.code === 'ENOENT') return {}; throw e; }
+}
+const diagnostics = {
+  configuration: 'Check command syntax and private configuration. Stop the worker; if the grant is missing or malformed, revoke on the phone and remove old collector.json and accounts.json before re-pairing.',
+  permissions: 'Stop the worker. Use an owned, non-symlink private directory (0700) and regular private files (0600) on POSIX; do not bypass ownership checks.',
+  grant_expired: 'Stop the worker. Revoke on the phone, remove old collector.json and accounts.json, then re-pair with the trusted HTTPS origin.',
+  revoked: 'Stop the worker. The grant was rejected; revoke on the phone, remove old collector.json and accounts.json, then re-pair.',
+  bindings: 'Stop the worker. Map every duplicate-provider slot to a distinct confirmed local fingerprint (at most 50 slots), then restart. Failed updates preserve existing mappings.',
+  unsupported_source: 'Use codex oauth, or claude/grok oauth or web; Gemini has no independent mapping. Stop the worker before changing mappings.',
+  cli_availability: 'Install a working CodexBar CLI or set QUOTADOCK_CODEXBAR_BIN to its executable. Doctor checks only --version, not authentication or quota support.',
+  service: 'Check connectivity and trusted server availability; no raw remote or child diagnostics are displayed.',
+};
+function category(e) {
+  if (['EACCES', 'EPERM', 'ELOOP'].includes(e?.code)) return 'permissions';
+  if (e?.code === 'ENOENT') return 'configuration';
+  if (e?.message === 'unsupported_mapping') return 'bindings';
+  if (e?.message === 'unsupported_slots' || e instanceof SyntaxError || e instanceof TypeError) return 'configuration';
+  return Object.hasOwn(diagnostics, e?.message) ? e.message : 'service';
+}
+function report(e) {
+  const kind = category(e);
+  process.stderr.write(`QuotaDock cloud [${kind}]: ${diagnostics[kind]}\n`);
+}
+function sourceCheck(provider, source) {
+  if (!['codex', 'claude', 'grok'].includes(provider) || !['oauth', 'web'].includes(source) || (provider === 'codex' && source !== 'oauth')) throw Error('unsupported_source');
+}
+function checkBindings(slots, bindings) {
+  if (bindings && typeof bindings === 'object' && !Array.isArray(bindings)) {
+    for (const b of Object.values(bindings)) if (b && Object.hasOwn(providers, b.provider)) sourceCheck(b.provider, b.source);
+  }
+  validateBindings(slots, bindings);
+}
+async function checkCLI() {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.env.QUOTADOCK_CODEXBAR_BIN || 'codexbar', ['--version'], {
+      shell: false, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true,
+    });
+    let done = false, size = 0;
+    const finish = ok => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch {}
+      if (ok) resolve(); else reject(Error('cli_availability'));
+    };
+    const timer = setTimeout(() => finish(false), 2000);
+    // Never retain or display child output, including purported version strings.
+    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { size += chunk.length; if (size > 4096) finish(false); });
+    child.on('error', () => finish(false));
+    child.on('close', code => finish(code === 0));
+  });
 }
 export function observations(slots, snapshot) {
   return accounts(slots).map(a => {
@@ -101,21 +156,38 @@ async function main() {
   const [base] = args;
   const file = `${homedir()}/.config/quotadock-cloud/collector.json`;
   const mappingFile = `${dirname(file)}/accounts.json`;
+  if (command === 'doctor') {
+    if (args.length) throw Error('configuration');
+    let failed = false;
+    try {
+      const c = await load(file);
+      checkBindings(c.accounts, await loadBindings(mappingFile));
+      process.stdout.write('Local grant, permissions and bindings: OK (maximum 50 slots).\n');
+    } catch (e) { failed = true; report(e); }
+    try { await checkCLI(); process.stdout.write('CodexBar --version: OK (output withheld).\n'); }
+    catch (e) { failed = true; report(e); }
+    process.stdout.write('Read-only local checks only; cloud grant validity, credentials and quota support were not tested.\n');
+    if (failed) process.exitCode = 1;
+    return;
+  }
   if (command === 'accounts') {
     if (args.length < 1 || args.length > 2) throw Error('configuration');
+    sourceCheck(args[0], args[1] ?? 'oauth');
+    await checkCLI();
     const fingerprints = await listAccounts(args[0], args[1] ?? 'oauth', { binary: process.env.QUOTADOCK_CODEXBAR_BIN || 'codexbar' });
     process.stdout.write(`${JSON.stringify({ provider: args[0], source: args[1] ?? 'oauth', fingerprints })}\n`); return;
   }
   if (command === 'map') {
     if (args.length < 3 || args.length > 4) throw Error('configuration');
     const [inputID, provider, fingerprint, source = 'oauth'] = args;
+    sourceCheck(provider, source);
     if (!uuid.test(inputID)) throw Error('configuration');
     const id = inputID.toLowerCase();
     const c = await load(file);
     const bindings = await loadBindings(mappingFile);
     const next = { ...bindings, [id]: { provider, fingerprint, source } };
     // Partial configuration is allowed while adding mappings; run validates all slots.
-    validateBindings(c.accounts.filter(a => Object.hasOwn(next, a.id)), next);
+    checkBindings(c.accounts.filter(a => Object.hasOwn(next, a.id)), next);
     const temporary = `${mappingFile}.${randomUUID()}.tmp`;
     try { await save(temporary, next); await rename(temporary, mappingFile); }
     finally { await unlink(temporary).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
@@ -143,16 +215,21 @@ async function main() {
   }
   const c = await load(file);
   c.bindings = await loadBindings(mappingFile);
-  validateBindings(c.accounts, c.bindings);
+  checkBindings(c.accounts, c.bindings);
+  await checkCLI();
   let nextAutoAt = 0;
   do {
+    if (Date.now() >= c.expiresAt) throw Error('grant_expired');
     const automatic = command === 'run' && Date.now() >= nextAutoAt;
     if (automatic) nextAutoAt = Date.now() + 20 * 60000;
     try { await runOnce(c, { automatic }); }
-    catch (e) { if (e.message === 'revoked' || command === 'once') throw e; process.stderr.write('QuotaDock cloud: temporary failure; retrying safely.\n'); }
+    catch (e) {
+      if (category(e) !== 'service' || command === 'once') throw e;
+      process.stderr.write(`QuotaDock cloud [service]: ${diagnostics.service} Retrying safely.\n`);
+    }
     if (command === 'run') await wait(20000);
   } while (command === 'run');
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(() => {
-  process.stderr.write('QuotaDock cloud: operation failed. Check network, private configuration, supported slots, and phone grant; re-pair if revoked or expired.\n'); process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(e => {
+  report(e); process.exitCode = 1;
 });

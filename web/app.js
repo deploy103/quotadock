@@ -180,33 +180,92 @@
       : "아직 받은 데이터가 없습니다.";
   }
   function valid(s) {
+    const object = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    const timestamp = (v) =>
+      typeof v === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) &&
+      Number.isFinite(Date.parse(v)) && new Date(v).toISOString() === v;
+    const nullableDate = (v) => v === null || timestamp(v);
+    const shortText = (v) => typeof v === "string" && v.length > 0 && v.length <= 80;
     return (
-      s &&
+      object(s) &&
       s.schemaVersion === 1 &&
       typeof s.demo === "boolean" &&
-      typeof s.generatedAt === "string" &&
-      Number.isFinite(Date.parse(s.generatedAt)) &&
+      timestamp(s.generatedAt) &&
       Array.isArray(s.providers) &&
+      s.providers.length <= 4 &&
+      new Set(s.providers.map((p) => p?.id)).size === s.providers.length &&
       s.providers.every(
         (p) =>
-          p &&
+          object(p) &&
           Object.hasOwn(names, p.id) &&
           ["available", "unavailable", "error"].includes(p.state) &&
           ["codexbar", "demo"].includes(p.source) &&
-          (p.plan === null || typeof p.plan === "string") &&
-          (p.observedAt === null || typeof p.observedAt === "string") &&
+          (p.plan === null || shortText(p.plan)) &&
+          nullableDate(p.observedAt) &&
           Array.isArray(p.windows) &&
+          p.windows.length <= 3 &&
+          new Set(p.windows.map((w) => w?.label)).size === p.windows.length &&
           p.windows.every(
             (w) =>
-              w &&
-              typeof w.label === "string" &&
+              object(w) &&
+              shortText(w.label) &&
               (w.remainingPercent === null ||
                 (typeof w.remainingPercent === "number" &&
                   Number.isFinite(w.remainingPercent))) &&
-              (w.resetsAt === null || typeof w.resetsAt === "string"),
+              nullableDate(w.resetsAt),
           ),
       )
     );
+  }
+  // Only quota vocabulary may cross into the UI, never upstream identity or diagnostics.
+  const plans = new Set([
+    "Free", "Plus", "Pro", "Max", "Max 5x", "Max 20x", "Team", "Enterprise",
+    "Standard", "Google AI Pro", "Google AI Ultra", "SuperGrok", "SuperGrok Heavy",
+    "ChatGPT Plus", "ChatGPT Pro", "Claude Pro", "Claude Max",
+  ]);
+  const labels = new Set([
+    "Session", "Weekly", "Monthly", "Daily", "Credits", "Pro", "Flash", "Flash Lite",
+    "5-hour", "7-day", "Pro tier", "Flash tier", "Flash Lite tier", "Secondary", "Additional",
+  ]);
+  function safeSnapshot(s) {
+    return {
+      schemaVersion: 1, demo: s.demo, generatedAt: s.generatedAt,
+      providers: s.providers.map((p) => ({
+        id: p.id, state: p.state, source: p.source, observedAt: p.observedAt,
+        plan: plans.has(p.plan) ? p.plan : null,
+        windows: p.windows.map((w) => ({
+          label: labels.has(w.label) ? w.label : "사용량",
+          remainingPercent: p.state === "available" ? w.remainingPercent : null,
+          resetsAt: w.resetsAt,
+        })),
+      })),
+    };
+  }
+  async function readBody(response, signal) {
+    const reader = response.body.getReader();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener("abort", cancel, { once: true });
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0, body = "", complete = false;
+    try {
+      while (true) {
+        if (signal.aborted) throw new Error("aborted");
+        const { done, value } = await reader.read();
+        if (signal.aborted) throw new Error("aborted");
+        if (done) break;
+        size += value.byteLength;
+        if (size > 262144) throw new Error("size");
+        body += decoder.decode(value, { stream: true });
+      }
+      body += decoder.decode();
+      complete = true;
+      return body;
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      if (!complete) cancel();
+      reader.releaseLock();
+    }
   }
   async function refresh() {
     if (busy || !paired || document.hidden) return;
@@ -226,12 +285,11 @@
         signal: controller.signal,
       });
       if (!response.ok) throw new Error("request");
-      const body = await response.text();
-      if (body.length > 262144) throw new Error("size");
+      const body = await readBody(response, controller.signal);
       const snapshot = JSON.parse(body);
       if (!valid(snapshot)) throw new Error("schema");
       if (version !== generation) return;
-      last = snapshot;
+      last = safeSnapshot(snapshot);
       failed = false;
       $("status").textContent = snapshot.providers.some(
         (p) => p.state === "available" && stale(p),

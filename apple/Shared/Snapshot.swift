@@ -6,13 +6,21 @@ struct Snapshot: Codable, Equatable {
     let demo: Bool
     let providers: [Provider]
 
+    // Contract vocabulary shared with the bridge and private collector validation.
+    private static let plans: Set<String> = ["Free", "Plus", "Pro", "Max", "Max 5x", "Max 20x", "Team", "Enterprise", "Standard", "Google AI Pro", "Google AI Ultra", "SuperGrok", "SuperGrok Heavy", "ChatGPT Plus", "ChatGPT Pro", "Claude Pro", "Claude Max"]
+    private static let labels: Set<String> = ["Session", "Weekly", "Monthly", "Daily", "Credits", "Pro", "Flash", "Flash Lite", "5-hour", "7-day", "Pro tier", "Flash tier", "Flash Lite tier", "Additional", "Secondary"]
+    // weekly and pro are used by the native preview, not the bridge's three slots.
+    private static let windowIDs: Set<String> = ["primary", "secondary", "tertiary", "weekly", "pro"]
+
     static func decode(_ data: Data) throws -> Snapshot {
         guard data.count <= 256 * 1024 else { throw SnapshotError.invalid }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let providers = root["providers"] as? [[String: Any]] else { throw SnapshotError.invalid }
+              let providers = root["providers"] as? [[String: Any]],
+              providers.count <= 4 else { throw SnapshotError.invalid }
         for provider in providers {
             guard ["id", "name", "plan", "state", "source", "message", "observedAt", "windows"].allSatisfy({ provider.keys.contains($0) }),
-                  let windows = provider["windows"] as? [[String: Any]] else { throw SnapshotError.invalid }
+                  let windows = provider["windows"] as? [[String: Any]],
+                  windows.count <= 3 else { throw SnapshotError.invalid }
             for window in windows {
                 guard ["id", "label", "remainingPercent", "resetsAt"].allSatisfy({ window.keys.contains($0) }) else { throw SnapshotError.invalid }
             }
@@ -28,7 +36,19 @@ struct Snapshot: Codable, Equatable {
             return date
         }
         let snapshot = try decoder.decode(Snapshot.self, from: data)
-        guard snapshot.schemaVersion == 1 else { throw SnapshotError.invalid }
+        guard snapshot.schemaVersion == 1,
+              Set(snapshot.providers.map { $0.id.rawValue }).count == snapshot.providers.count else { throw SnapshotError.invalid }
+        for provider in snapshot.providers {
+            guard !provider.name.isEmpty, provider.name.utf8.count <= 64,
+                  provider.plan.map({ plans.contains($0) }) ?? true,
+                  provider.message.map({ $0.utf8.count <= 1024 }) ?? true,
+                  provider.windows.count <= 3,
+                  Set(provider.windows.map(\.id)).count == provider.windows.count else { throw SnapshotError.invalid }
+            for window in provider.windows {
+                guard windowIDs.contains(window.id), labels.contains(window.label),
+                      window.remainingPercent.map({ $0.isFinite && (0...100).contains($0) }) ?? true else { throw SnapshotError.invalid }
+            }
+        }
         return snapshot
     }
 
@@ -64,11 +84,12 @@ struct Snapshot: Codable, Equatable {
     var sanitized: Snapshot {
         Snapshot(schemaVersion: schemaVersion, generatedAt: generatedAt, demo: demo,
                  providers: providers.map { provider in
-            Provider(id: provider.id, name: provider.id.displayName, plan: provider.plan,
+            Provider(id: provider.id, name: provider.id.displayName,
+                     plan: provider.plan.flatMap { Self.plans.contains($0) ? $0 : nil },
                      state: provider.state, source: provider.source,
                      message: provider.state == .available ? nil : "Usage unavailable",
                      observedAt: provider.observedAt, windows: provider.windows.map { window in
-                QuotaWindow(id: window.id, label: window.label,
+                QuotaWindow(id: window.id, label: Self.labels.contains(window.label) ? window.label : "Additional",
                             remainingPercent: provider.state == .available ? window.remainingPercent : nil,
                             resetsAt: window.resetsAt)
             })

@@ -21,6 +21,8 @@ targetTemplates:
       - Shared/SnapshotStore.swift
       - Shared/QuotaViews.swift
       - Shared/ProviderIcon.swift
+      - Shared/WidgetContent.swift
+      - Shared/WatchContent.swift
       - Assets.xcassets
     settings:
       base:

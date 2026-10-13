@@ -7,6 +7,34 @@ The cloud collector requires POSIX user IDs and private file permissions
 disable the ownership checks to make it run. Live provider availability still
 depends on the installed CodexBar build and its supported credential sources.
 
+## Safe local diagnostics
+
+```sh
+node bridge/cloud.mjs doctor
+```
+
+Doctor is read-only: it does not create the configuration directory, redeem a
+grant, collect quotas, or call cloud/provider APIs. It checks local grant shape
+and expiry, private ownership/permissions, the maximum-50-slot batch and complete
+bindings, then invokes only the configured CodexBar executable with `--version`
+(no shell, two-second deadline, 4096-byte combined output limit). All child output,
+including version text, is discarded. No tokens, fingerprints, account keys,
+emails, paths or raw errors are printed. Exit 0 means local checks passed; exit 1
+means at least one failed. It cannot verify remote revocation, authentication,
+independent-account eligibility, or an installed build's quota-query features.
+Only use a trusted executable; a malicious binary cannot be made read-only by
+the collector. `QUOTADOCK_CODEXBAR_BIN` selects that executable.
+
+CLI failures use fixed categories: `configuration`, `permissions`,
+`grant_expired`, `revoked`, `bindings`, `unsupported_source`, `cli_availability`
+and `service`. Each includes recovery instructions rather than raw exception or
+child text. Stop the worker before repairs or mapping changes. Never re-pair over
+an existing grant: revoke on the phone and remove both old private files first.
+Permission failures must be repaired, not bypassed; Windows ACL support remains
+unimplemented. Run/once/accounts also check CLI availability with the same bounded
+non-query probe before their normal network/query work. Unlike doctor, accounts
+intentionally prints local fingerprints and can contact provider APIs.
+
 ```sh
 node bridge/cloud.mjs pair https://YOUR-TRUSTED-QUOTADOCK-SERVER
 node bridge/cloud.mjs run

@@ -287,6 +287,9 @@ final class ContractTests: XCTestCase {
         XCTAssertThrowsError(try Pairing(baseURL: "https://user:pass@example.com", token: "secret"))
         XCTAssertThrowsError(try Pairing(baseURL: "https://example.com?token=secret", token: "secret"))
         XCTAssertThrowsError(try Pairing(baseURL: "https://example.com", token: "secret\nheader"))
+        for token in ["secret\u{0}header", "space token", String(repeating: "a", count: 129)] {
+            XCTAssertThrowsError(try Pairing(baseURL: "https://example.com", token: token))
+        }
         XCTAssertEqual(try Pairing(baseURL: "https://example.com", token: "secret").endpoint.path, "/v1/snapshot")
     }
 
@@ -301,6 +304,10 @@ final class ContractTests: XCTestCase {
             _ = try await client.fetch(Pairing(baseURL: "https://example.com/reject", token: "test-token"))
             XCTFail("Must reject non-200 responses")
         } catch SnapshotError.response { } catch { XCTFail("Unexpected error type") }
+        do {
+            _ = try await client.fetch(Pairing(baseURL: "https://example.com/oversized", token: "test-token"))
+            XCTFail("Must stop oversized response streams")
+        } catch SnapshotError.invalid { } catch { XCTFail("Unexpected error type") }
     }
 }
 
@@ -314,6 +321,11 @@ private final class StubProtocol: URLProtocol {
         let status = request.url?.path.contains("reject") == true ? 401 : 200
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if request.url?.path.contains("oversized") == true {
+            client?.urlProtocol(self, didLoad: Data(repeating: 32, count: 256 * 1024 + 1))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         client?.urlProtocol(self, didLoad: Data("""
         {"schemaVersion":1,"generatedAt":"2026-10-13T10:00:00.123Z","demo":false,"providers":[{"id":"codex","name":"Codex","plan":null,"state":"error","source":"codexbar","message":"private diagnostic","observedAt":null,"windows":[{"id":"primary","label":"Session","remainingPercent":99,"resetsAt":null}]}]}
         """.utf8))

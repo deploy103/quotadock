@@ -46,7 +46,7 @@ function start(search = "") {
   );
   const storage = new Map(),
     calls = [];
-  let interval, response;
+  let interval, response, deadline;
   const document = {
     hidden: false,
     events: {},
@@ -65,6 +65,7 @@ function start(search = "") {
     Intl,
     Date,
     AbortController,
+    TextDecoder,
     sessionStorage: {
       getItem: (k) => storage.get(k),
       setItem: (k, v) => storage.set(k, v),
@@ -78,12 +79,17 @@ function start(search = "") {
     clearInterval() {
       interval = undefined;
     },
-    setTimeout: () => 1,
-    clearTimeout() {},
+    setTimeout: (fn, ms) => {
+      assert.equal(ms, 15000);
+      deadline = fn;
+      return 1;
+    },
+    clearTimeout() { deadline = undefined; },
     fetch: async (url, options) => {
       calls.push({ url, options });
       if (response instanceof Error) throw response;
-      return { ok: true, text: async () => JSON.stringify(response) };
+      if (typeof response === "function") return response();
+      return new Response(JSON.stringify(response));
     },
   });
   return {
@@ -92,6 +98,7 @@ function start(search = "") {
     calls,
     document,
     tick: () => interval?.(),
+    expire: () => deadline?.(),
     reply: (value) => {
       response = value;
     },
@@ -221,4 +228,121 @@ test("foreground auto refresh defaults on; manual and hidden states stop request
   ids.disconnect.fire("click");
   app.tick();
   assert.equal(app.calls.length, 4);
+});
+const snapshot = () => ({
+  schemaVersion: 1, demo: false, generatedAt: new Date().toISOString(),
+  providers: [{
+    id: "claude", plan: "Max", state: "available", source: "codexbar",
+    observedAt: new Date().toISOString(),
+    windows: [{ label: "Session", remainingPercent: 42, resetsAt: null }],
+  }],
+});
+function pair(app) {
+  app.ids.endpoint.value = "https://dashboard.test";
+  app.ids.token.value = "d".repeat(64);
+  app.ids["connect-form"].fire("submit");
+}
+test("byte bound cancels oversized multibyte streams and preserves last good data", async () => {
+  const app = start();
+  app.reply(snapshot());
+  pair(app);
+  await settle();
+  let cancelled = false;
+  const bytes = new TextEncoder().encode("가".repeat(90000));
+  assert.ok(bytes.byteLength > 262144);
+  app.reply(() => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(bytes); },
+    cancel() { cancelled = true; },
+  })));
+  app.ids.refresh.fire("click");
+  await settle();
+  assert.equal(cancelled, true);
+  assert.match(text(app.ids.providers), /42% 남음/);
+  assert.match(text(app.ids.providers), /STALE/);
+  assert.match(app.ids.status.textContent, /연결 오류/);
+});
+test("malformed and duplicate snapshots fail closed without replacing the cache", async () => {
+  const app = start();
+  app.reply(snapshot());
+  pair(app);
+  await settle();
+  const mutations = [
+    s => s.providers.push(s.providers[0]),
+    s => s.providers[0].windows.push(s.providers[0].windows[0]),
+    s => s.providers[0].windows = Array.from({ length: 4 }, (_, i) => ({ label: String(i), remainingPercent: 10, resetsAt: null })),
+    s => s.providers[0].observedAt = "not a date",
+    s => s.providers[0].windows[0].resetsAt = "2026-02-30T00:00:00.000Z",
+    s => s.generatedAt = "2026-01-01",
+    s => s.providers[0].windows[0].remainingPercent = "0",
+    s => s.providers[0].plan = "x".repeat(81),
+    s => s.providers[0].windows[0] = null,
+  ];
+  for (const mutate of mutations) {
+    const bad = snapshot();
+    mutate(bad);
+    app.reply(bad);
+    app.ids.refresh.fire("click");
+    await settle();
+    assert.match(app.ids.status.textContent, /연결 오류/);
+    assert.match(text(app.ids.providers), /42% 남음/);
+    assert.match(text(app.ids.providers), /STALE/);
+  }
+});
+test("only safe quota vocabulary is rendered; errors and nullable measurements have no bar", async () => {
+  const app = start();
+  const s = snapshot();
+  const p = s.providers[0];
+  p.plan = "private@example.test";
+  p.message = "private diagnostic";
+  p.identity = { email: "private@example.test" };
+  p.windows[0].label = "private diagnostic";
+  p.windows[0].remainingPercent = null;
+  app.reply(s);
+  pair(app);
+  await settle();
+  assert.doesNotMatch(text(app.ids.providers), /private/);
+  assert.match(text(app.ids.providers), /알 수 없음/);
+  assert.equal(descendants(app.ids.providers).filter(e => e.tag === "progress").length, 0);
+  p.state = "error";
+  p.windows[0].remainingPercent = 99;
+  app.reply(s);
+  app.ids.refresh.fire("click");
+  await settle();
+  assert.equal(descendants(app.ids.providers).filter(e => e.tag === "progress").length, 0);
+  assert.doesNotMatch(text(app.ids.providers), /99%|private/);
+});
+test("late fetch completion after disconnect cannot restore data or pairing", async () => {
+  const app = start();
+  let resolve;
+  app.reply(() => new Promise(r => { resolve = r; }));
+  pair(app);
+  app.ids.disconnect.fire("click");
+  assert.equal(app.calls[0].options.signal.aborted, true);
+  resolve(new Response(JSON.stringify(snapshot())));
+  await settle();
+  assert.equal(app.ids.mode.textContent, "NOT CONNECTED");
+  assert.equal(app.ids.refresh.disabled, true);
+  assert.equal(app.storage.size, 0);
+  assert.doesNotMatch(text(app.ids.providers), /42%/);
+  assert.equal(app.ids.status.textContent, "브리지를 연결해 주세요");
+});
+test("15 second deadline cancels a stalled body and permits a manual retry", async () => {
+  const app = start();
+  let cancelled = false;
+  app.reply(() => new Response(new ReadableStream({
+    cancel() { cancelled = true; },
+  })));
+  pair(app);
+  await settle();
+  assert.equal(app.ids.refresh.disabled, true);
+  app.expire();
+  await settle();
+  assert.equal(cancelled, true);
+  assert.equal(app.calls[0].options.signal.aborted, true);
+  assert.equal(app.ids.refresh.disabled, false);
+  assert.match(app.ids.status.textContent, /연결하지 못했습니다/);
+  app.reply(snapshot());
+  app.ids.refresh.fire("click");
+  await settle();
+  assert.match(text(app.ids.providers), /42% 남음/);
 });

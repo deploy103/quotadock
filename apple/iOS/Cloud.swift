@@ -133,6 +133,7 @@ struct CloudSnapshot: Codable {
     let generatedAt: Date
     let demo: Bool
     let accounts: [Account]
+    var cachedSubset: Bool? = nil
     static func decode(_ data: Data) throws -> CloudSnapshot {
         guard data.count <= 256 * 1024 else { throw SnapshotError.invalid }
         let decoder = JSONDecoder()
@@ -148,6 +149,12 @@ struct CloudSnapshot: Codable {
         let result = try decoder.decode(Self.self, from: data)
         guard result.schemaVersion == 2,
               Set(result.accounts.map(\.id)).count == result.accounts.count else { throw SnapshotError.invalid }
+        for account in result.accounts {
+            // The same quota vocabulary and unique-window bounds protect v1/v2 caches.
+            let reading = Snapshot(schemaVersion: 1, generatedAt: result.generatedAt,
+                demo: result.demo, providers: [account.reading])
+            _ = try Snapshot.decode(reading.encoded())
+        }
         return result
     }
     // Small surfaces intentionally show only the first server-listed slot per provider.
@@ -157,7 +164,7 @@ struct CloudSnapshot: Codable {
                         providers: accounts.filter { seen.insert($0.provider).inserted }.map(\.reading)).sanitized
     }
     func cacheData() throws -> Data {
-        let clean = CloudSnapshot(schemaVersion: schemaVersion, generatedAt: generatedAt, demo: demo,
+        var clean = CloudSnapshot(schemaVersion: schemaVersion, generatedAt: generatedAt, demo: demo,
             accounts: accounts.map { account in
                 let reading = Snapshot(schemaVersion: 1, generatedAt: generatedAt, demo: demo,
                                        providers: [account.reading]).sanitized.providers[0]
@@ -165,6 +172,7 @@ struct CloudSnapshot: Codable {
                     state: reading.state, source: reading.source, observedAt: reading.observedAt,
                     windows: reading.windows, lastError: account.lastError == nil ? nil : "collection_unavailable")
             })
+        clean.cachedSubset = cachedSubset
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .custom { date, encoder in
             let formatter = ISO8601DateFormatter()
@@ -172,7 +180,14 @@ struct CloudSnapshot: Codable {
             var value = encoder.singleValueContainer()
             try value.encode(formatter.string(from: date))
         }
-        return try encoder.encode(clean)
+        let data = try encoder.encode(clean)
+        if data.count <= 256 * 1024 { return data }
+        var subset = CloudSnapshot(schemaVersion: schemaVersion, generatedAt: generatedAt, demo: demo,
+                                   accounts: Array(clean.accounts.prefix(50)))
+        subset.cachedSubset = true
+        let bounded = try encoder.encode(subset)
+        guard bounded.count <= 256 * 1024 else { throw SnapshotError.invalid }
+        return bounded
     }
 }
 
@@ -184,7 +199,9 @@ enum CloudCache {
             .appendingPathComponent("QuotaDock-cloud-snapshot.json")
     }
     static func load() -> CloudSnapshot? {
-        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        guard let url, let attributes = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+              attributes.isRegularFile == true, let size = attributes.fileSize, size <= 256 * 1024,
+              let data = try? Data(contentsOf: url) else { return nil }
         return try? CloudSnapshot.decode(data)
     }
     static func save(_ snapshot: CloudSnapshot) {
@@ -254,6 +271,9 @@ struct CloudClient {
         self.scope = scope
     }
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, timeout: TimeInterval = 20) async throws -> Data {
+        try Task.checkCancellation()
+        guard timeout > 0 else { throw SnapshotError.invalid }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
@@ -263,7 +283,10 @@ struct CloudClient {
         let requestID = UUID()
         scope?.insert(session, id: requestID)
         defer { scope?.remove(requestID); session.invalidateAndCancel() }
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        let parts = path.split(separator: "?", maxSplits: 1)
+        var components = URLComponents(url: baseURL.appendingPathComponent(String(parts[0])), resolvingAgainstBaseURL: false)!
+        if parts.count == 2 { components.percentEncodedQuery = String(parts[1]) }
+        var request = URLRequest(url: components.url!)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -273,15 +296,138 @@ struct CloudClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (bytes, response) = try await session.bytes(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+        guard let response = response as? HTTPURLResponse else { throw SnapshotError.response }
+        if response.statusCode == 404 { throw CloudHTTPError.notFound }
+        guard (200..<300).contains(response.statusCode) else {
             throw SnapshotError.response
         }
         var data = Data()
         for try await byte in bytes {
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < deadline else { throw SnapshotError.invalid }
             guard data.count < 256 * 1024 else { throw SnapshotError.invalid }
             data.append(byte)
         }
         return data
+    }
+}
+
+enum CloudHTTPError: Error { case notFound }
+
+final class CloudReadBudget {
+    let deadline: TimeInterval
+    private var bytes = 0
+    init(seconds: TimeInterval = CloudPagination.operationSeconds) {
+        deadline = ProcessInfo.processInfo.systemUptime + seconds
+    }
+    func validate() throws {
+        try Task.checkCancellation()
+        guard bytes <= CloudPagination.maximumBytes,
+              ProcessInfo.processInfo.systemUptime < deadline else { throw SnapshotError.invalid }
+    }
+    func fetch(_ path: String, client: CloudClient) async throws -> Data {
+        try Task.checkCancellation()
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0, bytes < CloudPagination.maximumBytes else { throw SnapshotError.invalid }
+        let data = try await client.request(path, timeout: min(20, remaining))
+        bytes += data.count
+        try validate()
+        return data
+    }
+}
+
+// One read (including metadata and legacy fallback): 60 seconds monotonic,
+// 8 MiB aggregate, 100 pages per endpoint (at most 5,000 slots).
+// The transport separately caps each response at 256 KiB and refuses redirects.
+struct CloudPagination {
+    static let operationSeconds: TimeInterval = 60
+    static let maximumBytes = 8 * 1024 * 1024
+    static let maximumPages = 100
+    struct Page<Row: Decodable>: Decodable {
+        let accounts: [Row]
+        let nextCursor: UUID?
+        init(accounts: [Row], nextCursor: UUID?) { self.accounts = accounts; self.nextCursor = nextCursor }
+        enum CodingKeys: String, CodingKey { case accounts, nextCursor }
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            accounts = try values.decode([Row].self, forKey: .accounts)
+            // Missing cursor is malformed, not an implicit end of the list.
+            guard values.contains(.nextCursor) else { throw SnapshotError.invalid }
+            nextCursor = try values.decodeIfPresent(UUID.self, forKey: .nextCursor)
+        }
+    }
+    static func collect<Row: Decodable>(path: String, id: (Row) -> UUID,
+        fetch: (String) async throws -> Data, decode: (Data) throws -> Page<Row>) async throws -> [Row] {
+        var rows: [Row] = []
+        var cursor: UUID?
+        for _ in 0..<maximumPages {
+            try Task.checkCancellation()
+            let query = "?limit=50" + (cursor.map { "&after=\($0.uuidString.lowercased())" } ?? "")
+            let page: Page<Row>
+            do { page = try decode(try await fetch(path + query)) }
+            catch CloudHTTPError.notFound {
+                // Only a missing first page means this server lacks the endpoint.
+                guard cursor == nil else { throw SnapshotError.invalid }
+                throw CloudHTTPError.notFound
+            }
+            guard page.accounts.count <= 50 else { throw SnapshotError.invalid }
+            var previous = cursor?.uuidString.lowercased()
+            for row in page.accounts {
+                let key = id(row).uuidString.lowercased()
+                guard previous.map({ key > $0 }) ?? true else { throw SnapshotError.invalid }
+                previous = key
+            }
+            if let next = page.nextCursor {
+                guard let last = page.accounts.last, next == id(last) else { throw SnapshotError.invalid }
+            }
+            rows += page.accounts
+            guard let next = page.nextCursor else { return rows }
+            cursor = next
+        }
+        throw SnapshotError.invalid
+    }
+    static func accounts(fetch: (String) async throws -> Data) async throws -> [CloudAccount] {
+        do {
+            return try await collect(path: "v2/accounts/page", id: { $0.id }, fetch: fetch) {
+                try JSONDecoder().decode(Page<CloudAccount>.self, from: $0)
+            }
+        } catch CloudHTTPError.notFound {
+            struct Legacy: Decodable { let accounts: [CloudAccount] }
+            let rows = try JSONDecoder().decode(Legacy.self, from: try await fetch("v2/accounts")).accounts
+            guard Set(rows.map(\.id)).count == rows.count else { throw SnapshotError.invalid }
+            return rows
+        }
+    }
+    static func snapshot(slots: [CloudAccount], fetch: (String) async throws -> Data) async throws -> CloudSnapshot {
+        var generatedAt: Date?
+        let rows: [CloudSnapshot.Account]
+        do {
+            rows = try await collect(path: "v2/snapshot/page", id: { $0.id }, fetch: fetch) { data in
+                let snapshot = try CloudSnapshot.decode(data)
+                guard !snapshot.demo, snapshot.cachedSubset != true else { throw SnapshotError.invalid }
+                if generatedAt == nil { generatedAt = snapshot.generatedAt }
+                struct Cursor: Decodable {
+                    let nextCursor: UUID?
+                    enum CodingKeys: String, CodingKey { case nextCursor }
+                    init(from decoder: Decoder) throws {
+                        let values = try decoder.container(keyedBy: CodingKeys.self)
+                        guard values.contains(.nextCursor) else { throw SnapshotError.invalid }
+                        nextCursor = try values.decodeIfPresent(UUID.self, forKey: .nextCursor)
+                    }
+                }
+                return Page(accounts: snapshot.accounts, nextCursor: try JSONDecoder().decode(Cursor.self, from: data).nextCursor)
+            }
+        } catch CloudHTTPError.notFound {
+            let legacy = try CloudSnapshot.decode(try await fetch("v2/snapshot"))
+            guard !legacy.demo, legacy.cachedSubset != true else { throw SnapshotError.invalid }
+            generatedAt = legacy.generatedAt
+            rows = legacy.accounts
+        }
+        guard Set(slots.map(\.id)).count == slots.count else { throw SnapshotError.invalid }
+        let owned = Dictionary(uniqueKeysWithValues: slots.map { ($0.id, $0.provider) })
+        guard rows.count == slots.count, Set(rows.map(\.id)).count == rows.count,
+              rows.allSatisfy({ owned[$0.id] == $0.provider }), let generatedAt else { throw SnapshotError.invalid }
+        return CloudSnapshot(schemaVersion: 2, generatedAt: generatedAt, demo: false, accounts: rows)
     }
 }
 
@@ -435,18 +581,19 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         defer { reading = false }
         let current = revision
         do {
-            let me = try await client.request("v2/me")
-            guard current == revision, foreground, !Task.isCancelled else { return }
-            let accounts = try await client.request("v2/accounts")
-            guard current == revision, foreground, !Task.isCancelled else { return }
-            let data = try await client.request("v2/snapshot")
-            guard current == revision, foreground, !Task.isCancelled else { return }
-            let verified = try CloudMe.decode(me)
+            let operation = CloudReadBudget()
+            func fetch(_ path: String) async throws -> Data {
+                guard current == revision, foreground, session != nil else { throw CancellationError() }
+                let data = try await operation.fetch(path, client: client)
+                guard current == revision, foreground, session != nil else { throw CancellationError() }
+                return data
+            }
+            let verified = try CloudMe.decode(try await fetch("v2/me"))
+            let nextSlots = try await CloudPagination.accounts(fetch: fetch)
+            let next = try await CloudPagination.snapshot(slots: nextSlots, fetch: fetch)
             struct Collectors: Decodable { let collectors: [CloudCollector] }
-            let paired = try? JSONDecoder().decode(Collectors.self, from: try await client.request("v2/collectors"))
-            struct Accounts: Decodable { let accounts: [CloudAccount] }
-            let next = try CloudSnapshot.decode(data)
-            let nextSlots = try JSONDecoder().decode(Accounts.self, from: accounts).accounts
+            let paired = try? JSONDecoder().decode(Collectors.self, from: try await fetch("v2/collectors"))
+            try operation.validate()
             guard current == revision, session != nil, foreground, !Task.isCancelled else { return }
             slots = nextSlots; snapshot = next
             if liveEnabled, !CloudBatchSelection.valid(liveSlotIDs, slots: nextSlots) {
@@ -458,7 +605,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             budget = verified.budget
             if !verified.limits.live { liveEnabled = false; liveTask?.cancel() }
             onSnapshot?(next.smallSurfaceSnapshot)
-            status = "Cached server observations. Local collector required for new readings."
+            status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
         } catch { if current == revision { status = "Cloud read unavailable or session expired. Original observations retained; sign in again if needed." } }
     }
     func mutate(path: String, method: String, body: [String: Any] = [:]) async {
@@ -586,24 +733,28 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
 
     private func poll(client: CloudClient, current: Int, live: Bool) async {
         // Cancellation on leaving foreground cancels sleeps and URLSession async requests.
-        let deadline = Date().addingTimeInterval(60)
+        let operation = CloudReadBudget()
+        let deadline = operation.deadline
         let original = snapshot?.accounts.map(\.observedAt)
         do {
             for _ in 0..<12 {
-                let wait = min(5, deadline.timeIntervalSinceNow)
+                let wait = min(5, deadline - ProcessInfo.processInfo.systemUptime)
                 guard wait > 0 else { break }
                 try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                 guard foreground, current == revision, session != nil else { return }
-                let remaining = deadline.timeIntervalSinceNow
+                let remaining = deadline - ProcessInfo.processInfo.systemUptime
                 guard remaining > 0 else { break }
-                let data = try await client.request("v2/snapshot", timeout: min(20, remaining))
+                func fetch(_ path: String) async throws -> Data {
+                    guard foreground, current == revision, session != nil else { throw CancellationError() }
+                    return try await operation.fetch(path, client: client)
+                }
+                let next = try await CloudPagination.snapshot(slots: slots, fetch: fetch)
                 try Task.checkCancellation()
                 guard foreground, current == revision, session != nil else { return }
-                let next = try CloudSnapshot.decode(data)
                 snapshot = next; CloudCache.save(next); onSnapshot?(next.smallSurfaceSnapshot)
                 if next.accounts.map(\.observedAt) != original {
                     if live, liveDeadline == nil {
-                        let verified = try CloudMe.decode(try await client.request("v2/me", timeout: min(20, max(1, deadline.timeIntervalSinceNow))))
+                        let verified = try CloudMe.decode(try await fetch("v2/me"))
                         guard current == revision, foreground, !Task.isCancelled else { return }
                         me = verified; budget = verified.budget
                         reconcileLive(verified: verified)
@@ -634,6 +785,9 @@ struct CloudReadingsView: View {
         VStack(alignment: .leading) {
             Text(model.status).font(.caption)
             Text(model.budget).font(.caption)
+            if model.snapshot?.cachedSubset == true {
+                Text("Offline cache: first 50 slots only, not the complete account list. Original observation times retained.").font(.caption)
+            }
             ForEach(model.snapshot?.accounts ?? []) { account in
                 Text("\(account.provider.displayName) · \(account.id.uuidString.prefix(8))").font(.caption)
                 ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
@@ -718,6 +872,9 @@ struct CloudView: View {
                 }.disabled(!quotaStorageConsent || !collectorProcessingConsent || model.busy)
             } else {
                 Text(model.budget)
+                if model.snapshot?.cachedSubset == true {
+                    Text("Offline cache: first 50 slots only, not the complete account list. Read the server for all slots.").font(.caption)
+                }
                 Text("Local collector required. No provider login or purchases on this phone.")
                 Text("Purchases unavailable in this app: Apple products and signing configuration are not ready. Only server-verified entitlements apply.").font(.caption)
                 if let me = model.me {

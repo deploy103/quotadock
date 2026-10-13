@@ -20,12 +20,38 @@ enum DockTheme {
 
 struct RemainingBar: View {
     let window: QuotaWindow
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var remainingText: String {
+        guard let remaining = window.clampedRemaining else { return "Remaining unknown" }
+        // A positive fractional allowance must not read as an exhausted (zero) quota.
+        if remaining > 0 && remaining < 0.01 { return "<0.01% remaining" }
+        return "\(remaining.formatted(.number.precision(.fractionLength(0...2))))% remaining"
+    }
+
+    private var stackedLabel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(window.label)
+            Text(remainingText).monospacedDigit().fontWeight(.semibold)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(window.label).lineLimit(1)
-                Spacer()
-                Text(window.clampedRemaining.map { "\(Int($0))% left" } ?? "Unknown").monospacedDigit()
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    stackedLabel
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(window.label).fixedSize()
+                            Spacer(minLength: 12)
+                            Text(remainingText).monospacedDigit().fontWeight(.semibold).fixedSize()
+                        }
+                        stackedLabel
+                    }
+                }
             }.font(.caption)
             if let remaining = window.clampedRemaining {
                 GeometryReader { geometry in
@@ -38,9 +64,18 @@ struct RemainingBar: View {
             if let reset = window.resetsAt {
                 Text("Reset: \(reset.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(window.label)
+        .accessibilityValue(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        let remaining = remainingText.replacingOccurrences(of: "<0.01%", with: "Less than 0.01 percent")
+        guard let reset = window.resetsAt else { return remaining }
+        return "\(remaining). Reset: \(reset.formatted(date: .abbreviated, time: .shortened))"
     }
 }
 
@@ -49,24 +84,35 @@ struct ProviderCard: View {
     let demo: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 ProviderIcon(id: provider.id)
                 Text(provider.id.displayName).font(.headline)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
-                if demo || provider.source == .demo { Text("DEMO").font(.caption).foregroundStyle(DockTheme.mint) }
+                if demo || provider.source == .demo {
+                    Text("DEMO").font(.caption).foregroundStyle(DockTheme.mint)
+                        .accessibilityLabel("Demo sample data")
+                }
             }
-            Text(provider.plan ?? "Plan unknown").font(.caption).foregroundStyle(.secondary)
+            Text(provider.plan.map { "Plan: \($0)" } ?? "Plan unknown")
+                .font(.subheadline).foregroundStyle(.secondary)
             if provider.id == .codex {
                 Text("Codex allowance · not total ChatGPT usage").font(.caption2).foregroundStyle(.secondary)
             }
             if provider.state != .available { Text("Usage unavailable").foregroundStyle(.secondary) }
-            if provider.isStale() { Text(provider.observedAt == nil ? "Not observed" : "Stale · over 15 minutes old").font(.caption).foregroundStyle(.orange) }
+            if provider.isStale() {
+                Text(provider.observedAt == nil ? "Not observed" : "Stale · over 15 minutes old")
+                    .font(.subheadline).fontWeight(.semibold).foregroundStyle(.orange)
+            }
             ForEach(provider.displayWindows) { RemainingBar(window: $0) }
             if provider.windows.isEmpty { Text("Remaining unknown").font(.caption) }
             if let observed = provider.observedAt {
                 Text("Observed \(observed.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary)
             }
-        }.padding(.vertical, 16)
+        }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .contain)
+            .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Divider() }
     }

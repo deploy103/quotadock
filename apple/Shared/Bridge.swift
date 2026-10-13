@@ -9,7 +9,8 @@ struct Pairing: Codable {
         guard let url = URL(string: baseURL), url.scheme?.lowercased() == "https",
               url.host != nil, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil, !token.isEmpty,
-              !token.contains(where: { $0.isNewline || $0 == "\r" }) else {
+              token.utf8.count <= 128,
+              token.utf8.allSatisfy({ (33...126).contains($0) }) else {
             throw SnapshotError.insecureURL
         }
         endpoint = url.appendingPathComponent("v1/snapshot")
@@ -68,6 +69,7 @@ struct BridgeClient {
     init(session: URLSession? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 20
         configuration.urlCache = nil
         self.session = session ?? URLSession(configuration: configuration, delegate: HTTPSRedirectPolicy(), delegateQueue: nil)
     }
@@ -75,13 +77,24 @@ struct BridgeClient {
     func fetch(_ pairing: Pairing) async throws -> Snapshot {
         guard pairing.endpoint.scheme?.lowercased() == "https",
               pairing.endpoint.host != nil, pairing.endpoint.user == nil,
-              pairing.endpoint.password == nil else { throw SnapshotError.insecureURL }
+              pairing.endpoint.password == nil, pairing.endpoint.query == nil,
+              pairing.endpoint.fragment == nil, !pairing.token.isEmpty,
+              pairing.token.utf8.count <= 128,
+              pairing.token.utf8.allSatisfy({ (33...126).contains($0) }) else { throw SnapshotError.insecureURL }
         var request = URLRequest(url: pairing.endpoint)
         request.setValue("Bearer \(pairing.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
+        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
             throw SnapshotError.response
+        }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 256 * 1024,
+                  ProcessInfo.processInfo.systemUptime < deadline else { throw SnapshotError.invalid }
+            data.append(byte)
         }
         return try Snapshot.decode(data).sanitized
     }
