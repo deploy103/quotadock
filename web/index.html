@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>QuotaDock · 남은 AI 사용량</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <a class="brand" href="/">◈ <span>QuotaDock</span></a
+        ><span class="tag">YOUR AI, AT A GLANCE</span
+        ><span id="mode" class="badge">NOT CONNECTED</span>
+      </header>
+      <main>
+        <section class="intro">
+          <div>
+            <p class="eyebrow">A LITTLE CLARITY, BEFORE YOUR NEXT PROMPT</p>
+            <h1>다음 작업 전,<br />남은 여유를 확인하세요.</h1>
+            <p class="muted">
+              여러 AI의 남은 사용량을 한곳에서. 창마다 따로, 정확히.
+            </p>
+          </div>
+          <div class="status-box">
+            <span class="status-dot"></span
+            ><strong id="status" role="status" aria-live="polite"
+              >브리지를 연결해 주세요</strong
+            >
+            <p id="updated">아직 받은 데이터가 없습니다.</p>
+            <button id="refresh" type="button" disabled>↻ 지금 새로고침</button>
+          </div>
+        </section>
+        <section class="connection" aria-labelledby="setup-title">
+          <div>
+            <h2 id="setup-title">나의 브리지 연결</h2>
+            <p>
+              이 페이지와 같은 브리지 주소와 페어링 토큰을 입력하세요.
+              HTTP는 로컬 루프백만 허용하며, 토큰은 이 탭의 세션에만 저장됩니다.
+            </p>
+          </div>
+          <form id="connect-form">
+            <label
+              >브리지 주소<input
+                id="endpoint"
+                type="url"
+                placeholder="https://bridge.example.com"
+                required
+                autocomplete="url" /></label
+            ><label
+              >페어링 토큰<input
+                id="token"
+                type="password"
+                placeholder="토큰 입력"
+                required
+                autocomplete="off"
+                spellcheck="false" /></label
+            ><button type="submit">
+              연결하기 <span aria-hidden="true">↗</span></button
+            ><button id="disconnect" class="secondary" type="button" hidden>
+              연결 해제
+            </button>
+          </form>
+          <p id="connection-message" role="alert"></p>
+        </section>
+        <section class="quotas" aria-labelledby="quota-title">
+          <div class="section-head">
+            <h2 id="quota-title">사용량 보드</h2>
+            <span>REMAINING / 남은 비율</span>
+          </div>
+          <div id="providers" class="providers"></div>
+        </section>
+        <section class="preview-section" aria-labelledby="preview-title">
+          <div class="section-head">
+            <h2 id="preview-title">작은 화면에도, 같은 여유</h2>
+            <span class="badge">WEB PREVIEW · 웹 미리보기</span>
+          </div>
+          <p class="muted">
+            아래는 웹으로 그린 위젯·Watch 예시입니다. 실제 네이티브 앱
+            스크린샷이 아닙니다.
+          </p>
+          <div class="previews">
+            <article class="widget">
+              <div class="preview-top">
+                <strong>◈ QuotaDock</strong
+                ><span class="sample-label">DEMO</span>
+              </div>
+              <h3><img class="preview-icon" src="/icons/claude.svg" alt="" /> Claude <span>Max · 예시</span></h3>
+              <div
+                class="mini-track"
+                role="progressbar"
+                aria-label="예시 Claude 남은 사용량"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="72"
+              >
+                <span></span>
+              </div>
+              <p><strong>72% 남음</strong><span>Session · 예시 데이터</span></p>
+            </article>
+            <article class="watch">
+              <div class="watch-face">
+                <div class="preview-top">
+                  <strong>◈</strong><span class="sample-label">DEMO</span>
+                </div>
+                <h3><img class="preview-icon" src="/icons/codex.svg" alt="" /> Codex</h3>
+                <strong class="watch-value">84<span>%</span></strong>
+                <p>남음 · 예시 데이터</p>
+                <div
+                  class="mini-track codex-track"
+                  role="progressbar"
+                  aria-label="예시 Codex 남은 사용량"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="84"
+                >
+                  <span></span>
+                </div>
+              </div>
+            </article>
+            <div class="preview-copy">
+              <p class="eyebrow">LESS CHECKING. MORE MAKING.</p>
+              <h3>작업 흐름은 그대로.<br />확인은 더 가볍게.</h3>
+              <p>
+                iPhone · Widget · Apple Watch<br />설치와 네이티브 빌드 안내는
+                GitHub README에서 확인하세요.
+              </p>
+              <a
+                href="https://github.com/deploy103/quotadock#readme"
+                target="_blank"
+                rel="noopener noreferrer"
+                >네이티브 설치 안내 ↗</a
+              >
+            </div>
+          </div>
+        </section>
+        <footer>
+          <span>◈ QuotaDock</span>
+          <p>
+            Codex는 ChatGPT 플랜의 Codex 허용량이며, 전체 ChatGPT 사용량이
+            아닙니다.<br />리셋 시각은 참고 정보입니다. 새 할당량을 보장하지
+            않으며, 브리지 캐시는 60초입니다.
+          </p>
+          <span>BUILT FOR FOCUS</span>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

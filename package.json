@@ -1,0 +1,15 @@
+{
+  "name": "quotadock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first AI quota bridge for iPhone, Apple Watch and widgets",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node bridge/cli.mjs serve",
+    "demo": "node bridge/cli.mjs serve --demo",
+    "status": "node bridge/cli.mjs status",
+    "test": "node --test bridge/*.test.mjs web/*.test.cjs"
+  },
+  "license": "MIT"
+}

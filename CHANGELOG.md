@@ -1,0 +1,15 @@
+# Changelog
+
+Notable user-visible changes are recorded here. Source-preview entries do not
+imply a signed binary release or App Store availability.
+
+## 0.1.0 — Source preview
+
+- Local-first, zero-dependency Node.js 22 bridge around an installed CodexBar CLI.
+- Authenticated v1 snapshots with explicit unknown, unavailable, demo, and stale semantics.
+- Source clients for a web dashboard, iPhone, widgets, and Apple Watch.
+- Private HTTPS device connection model; provider sessions remain on the host.
+- Repository-local read-only inspection skills and public contribution workflows.
+
+No App Store/TestFlight distribution, real-time background refresh guarantee,
+or account-independent provider availability is promised.
