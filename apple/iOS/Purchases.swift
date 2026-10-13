@@ -221,6 +221,8 @@ final class PurchasesModel: ObservableObject {
             let data = try await client.request("v2/subscriptions/verify", method: "POST", body: body)
             let tier = try PurchasePolicy.acceptedTier(data)
             guard current(value) else { return }
+            // Deliver a queued newer refund/revocation before acknowledging this ID.
+            guard newerUpdates[transaction.id] == nil else { return }
             // Server acceptance, including free (expired/refunded), is required before finish.
             await transaction.finish()
             guard current(value) else { return }
@@ -272,7 +274,7 @@ struct SubscriptionPanel: View {
             Button("상품 다시 불러오기", action: load).disabled(!available || busy)
             Button("구매 복원", action: restore).disabled(!available || busy)
             if busy { ProgressView("처리 중 · 서버 확인 전에는 권한을 적용하지 않습니다.") }
-            Text("매월 자동 갱신되는 구독입니다. Apple 계정에 요금이 청구되며, 다음 갱신 전까지 Apple 구독 설정에서 취소할 수 있습니다. AI 제공업체의 추가 사용량을 판매하는 것이 아닙니다. 클라우드 계정 삭제는 Apple 구독을 취소하지 않습니다.")
+            Text("구독을 구매하면 매월 자동 갱신되며 Apple 계정에 요금이 청구됩니다. 다음 갱신 전까지 Apple 구독 설정에서 취소할 수 있습니다. AI 제공업체의 추가 사용량을 판매하는 것이 아닙니다. 클라우드 계정 삭제는 Apple 구독을 취소하지 않습니다.")
                 .font(.caption).foregroundStyle(.secondary)
             Link("Apple 구독 관리", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
             Link("개인정보·데이터 안내", destination: URL(string: "https://usage.mvtp.cloud/#privacy")!)
@@ -303,13 +305,12 @@ struct SubscriptionsPreview: View {
             Form {
                 Text("DEMO · UI sample only. No purchase is possible.").font(.caption)
                 SubscriptionPanel(available: state != "purchases-unavailable", busy: state == "purchases-pending",
-                    status: state == "purchases-pending" ? "Apple 승인 대기 중입니다. 유료 권한은 아직 확인되지 않았습니다." :
+                    status: state == "purchases-pending" ? "구매 검증 중입니다. 서버 확인 전까지 유료 권한을 적용하지 않습니다." :
                         state == "purchases-error" ? "서버 검증을 확인하지 못했습니다. 구매 복원으로 다시 시도하세요. 마지막 사용량은 유지됩니다." :
-                        state == "purchases-unavailable" ? "현재 구매할 수 없습니다." : "구독 상품 예시 · 실제 가격은 Apple에서 불러옵니다.",
+                        state == "purchases-unavailable" ? "현재 구매할 수 없습니다." : "상품·가격은 화면 예시입니다. 실제 결제 기능은 연결되어 있지 않습니다.",
                     options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: "₩3,990 예시"),
                               SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: "가격 미정")],
                     load: {}, purchase: { _ in }, restore: {})
-                    .disabled(true)
             }.navigationTitle("구독")
         }
     }
