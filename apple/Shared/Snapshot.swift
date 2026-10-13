@@ -34,7 +34,12 @@ struct Snapshot: Codable, Equatable {
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var value = encoder.singleValueContainer()
+            try value.encode(formatter.string(from: date))
+        }
         // Synthesized Codable omits nil keys; contract v1 requires explicit null.
         let data = try encoder.encode(self)
         guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -73,7 +78,8 @@ struct Snapshot: Codable, Equatable {
     static var preview: Snapshot {
         Snapshot(schemaVersion: 1, generatedAt: Date(), demo: true, providers: [
             Provider(id: .claude, name: "Claude", plan: "Max", state: .available, source: .demo,
-                     message: nil, observedAt: Date(), windows: [QuotaWindow(id: "primary", label: "Session", remainingPercent: 72, resetsAt: nil)]),
+                     message: nil, observedAt: Date(), windows: [QuotaWindow(id: "primary", label: "Session", remainingPercent: 72, resetsAt: Date().addingTimeInterval(3600)),
+                         QuotaWindow(id: "secondary", label: "Weekly", remainingPercent: 38, resetsAt: Date().addingTimeInterval(86400))]),
             Provider(id: .codex, name: "Codex", plan: "ChatGPT Plus", state: .available, source: .demo,
                      message: nil, observedAt: Date(), windows: [QuotaWindow(id: "weekly", label: "Weekly", remainingPercent: 43, resetsAt: nil)]),
             Provider(id: .gemini, name: "Gemini", plan: nil, state: .unavailable, source: .demo,
@@ -101,6 +107,15 @@ struct Provider: Codable, Identifiable, Equatable {
     let message: String?
     let observedAt: Date?
     let windows: [QuotaWindow]
+
+    // All surfaces, including accessories, must treat lookup failures as unknown.
+    var displayWindows: [QuotaWindow] {
+        windows.map { window in
+            QuotaWindow(id: window.id, label: window.label,
+                        remainingPercent: state == .available ? window.remainingPercent : nil,
+                        resetsAt: window.resetsAt)
+        }
+    }
 
     func isStale(at date: Date = Date()) -> Bool {
         guard let observedAt else { return true }

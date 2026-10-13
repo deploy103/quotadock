@@ -2,6 +2,130 @@ import XCTest
 @testable import QuotaDock
 
 final class ContractTests: XCTestCase {
+    private let cloudFixture = Data("""
+    {"schemaVersion":2,"generatedAt":"2026-10-13T10:30:00Z","demo":false,"sessionToken":"must-not-cache","accounts":[
+      {"accountId":"11111111-1111-4111-8111-111111111111","provider":"codex","name":"ignored private name","plan":"ChatGPT Pro","state":"available","source":"codexbar","observedAt":"2026-10-13T10:00:00.123Z","windows":[{"id":"primary","label":"Session","remainingPercent":75,"resetsAt":null},{"id":"secondary","label":"Weekly","remainingPercent":28,"resetsAt":null}],"lastError":"private diagnostic"},
+      {"accountId":"22222222-2222-4222-8222-222222222222","provider":"codex","name":"Codex","plan":null,"state":"unavailable","source":"codexbar","observedAt":null,"windows":[{"id":"primary","label":"Session","remainingPercent":null,"resetsAt":null}],"lastError":null}
+    ]}
+    """.utf8)
+
+    func testCloudPreservesSameProviderSlotsAndUnknownWindows() throws {
+        let snapshot = try CloudSnapshot.decode(cloudFixture)
+        XCTAssertEqual(snapshot.accounts.count, 2)
+        XCTAssertNotEqual(snapshot.accounts[0].id, snapshot.accounts[1].id)
+        XCTAssertEqual(snapshot.accounts.map(\.provider), [.codex, .codex])
+        XCTAssertEqual(snapshot.accounts[0].windows.count, 2)
+        XCTAssertEqual(snapshot.accounts[0].reading.displayWindows[1].clampedRemaining, 28)
+        XCTAssertNil(snapshot.accounts[1].reading.displayWindows.first?.clampedRemaining)
+        XCTAssertNil(snapshot.accounts[1].observedAt)
+        XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers.count, 1)
+        XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers[0].windows[0].clampedRemaining, 75)
+        XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers[0].observedAt, snapshot.accounts[0].observedAt)
+    }
+
+    func testCloudCacheExportsOnlySanitizedQuotaAndOriginalTime() throws {
+        let snapshot = try CloudSnapshot.decode(cloudFixture)
+        let full = try snapshot.cacheData()
+        let shared = try snapshot.smallSurfaceSnapshot.encoded()
+        for data in [full, shared] {
+            let text = String(decoding: data, as: UTF8.self)
+            for secret in ["sessionToken", "must-not-cache", "private diagnostic", "ignored private name"] {
+                XCTAssertFalse(text.contains(secret))
+            }
+        }
+        let cached = try CloudSnapshot.decode(full)
+        XCTAssertEqual(cached.accounts.count, 2)
+        XCTAssertEqual(cached.accounts[0].observedAt, snapshot.accounts[0].observedAt)
+        XCTAssertEqual(cached.accounts[0].lastError, "collection_unavailable")
+        XCTAssertNil(cached.accounts[1].windows[0].clampedRemaining)
+        XCTAssertEqual(try Snapshot.decode(shared).providers[0].observedAt, snapshot.accounts[0].observedAt)
+    }
+
+    func testCloudVerifiedTierLimitsIntervalsAndCounters() throws {
+        for (tier, cap, minutes, allowed, early, liveLimit) in [
+            ("free", "3", 120, "[120]", "10", 0),
+            ("plus", "10", 60, "[60]", "null", 5),
+            ("pro", "null", 20, "[20,30,60,120]", "null", 5)
+        ] {
+            let json = """
+            {"tier":"\(tier)","limits":{"accounts":\(cap),"autoMinutes":\(minutes),"allowedAutoMinutes":\(allowed),"earlyBatchesPerDay":\(early),"live":\(tier != "free")},"autoMinutes":\(minutes),"earlyBatchesUsed":2,"liveSessionsUsed":0,"liveSessionsLimit":\(liveLimit),"purchasesAvailable":false,"identity":"never display"}
+            """
+            let me = try CloudMe.decode(Data(json.utf8))
+            XCTAssertEqual(me.autoMinutes, minutes)
+            XCTAssertEqual(me.earlyBatchesUsed, 2)
+            XCTAssertEqual(me.limits.accounts, Int(cap))
+            XCTAssertFalse(me.purchasesAvailable)
+            XCTAssertTrue(me.budget.contains(tier.capitalized))
+            XCTAssertFalse(me.budget.contains("never display"))
+            XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"earlyBatchesUsed\":2", with: "\"earlyBatchesUsed\":-1").utf8)))
+            XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"tier\":\"\(tier)\"", with: "\"tier\":\"clientPaid\"").utf8)))
+            XCTAssertThrowsError(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"autoMinutes\":\(minutes)", with: "\"autoMinutes\":7").utf8)))
+            if tier == "pro" {
+                for interval in [20, 30, 60, 120] {
+                    XCTAssertEqual(try CloudMe.decode(Data(json.replacingOccurrences(of: "\"autoMinutes\":20", with: "\"autoMinutes\":\(interval)").utf8)).autoMinutes, interval)
+                }
+                var root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+                root["liveSession"] = ["accountIds": ["11111111-1111-4111-8111-111111111111"], "startedAt": "2026-10-13T10:00:00.000Z", "deadline": "2026-10-13T10:30:00.000Z"]
+                let resumed = try CloudMe.decode(JSONSerialization.data(withJSONObject: root))
+                XCTAssertEqual(resumed.liveSessionsUsed, 0) // Renewal can reset counters during an active session.
+                XCTAssertEqual(resumed.liveSession?.deadlineDate, Date(timeIntervalSince1970: 1791887400))
+            }
+        }
+    }
+
+    func testCloudSnapshotAllowsMoreThanFreeRegistrationCap() throws {
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: cloudFixture) as? [String: Any])
+        let template = try XCTUnwrap((root["accounts"] as? [[String: Any]])?.first)
+        root["accounts"] = (0..<11).map { _ -> [String: Any] in
+            var account = template
+            account["accountId"] = UUID().uuidString
+            return account
+        }
+        let snapshot = try CloudSnapshot.decode(JSONSerialization.data(withJSONObject: root))
+        XCTAssertEqual(snapshot.accounts.count, 11)
+        XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers.count, 1)
+    }
+
+    func testCollectorApprovalRequiresMatchingDistinctProviderSlotsAndExactCode() {
+        let first = CloudAccount(id: UUID(), provider: .codex)
+        let duplicate = CloudAccount(id: UUID(), provider: .codex)
+        let other = CloudAccount(id: UUID(), provider: .claude)
+        let slots = [first, duplicate, other]
+        XCTAssertTrue(CollectorApproval.valid(code: "AB0123EF", selected: [first.id, other.id], slots: slots))
+        XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [first.id, duplicate.id], slots: slots))
+        XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [UUID()], slots: slots))
+        XCTAssertFalse(CollectorApproval.valid(code: "AB0123EF", selected: [], slots: slots))
+        for code in ["ab0123ef", "AB0123EG", " AB0123EF", "AB0123E", "ＡＢ0123EF"] {
+            XCTAssertFalse(CollectorApproval.valid(code: code, selected: [first.id], slots: slots))
+        }
+    }
+
+    func testCloudRejectsDuplicateAccountsAndInsecureServer() throws {
+        let duplicate = String(decoding: cloudFixture, as: UTF8.self).replacingOccurrences(
+            of: "22222222-2222-4222-8222-222222222222", with: "11111111-1111-4111-8111-111111111111")
+        XCTAssertThrowsError(try CloudSnapshot.decode(Data(duplicate.utf8)))
+        XCTAssertThrowsError(try CloudSnapshot.decode(Data(repeating: 32, count: 256 * 1024 + 1)))
+        XCTAssertThrowsError(try CloudClient(baseURL: "http://usage.mvtp.cloud"))
+        XCTAssertThrowsError(try CloudClient(baseURL: "https://user:password@example.com"))
+        XCTAssertThrowsError(try CloudClient(baseURL: "https://example.com?secret=x"))
+        XCTAssertEqual(try CloudClient(baseURL: "https://usage.mvtp.cloud").baseURL.host, "usage.mvtp.cloud")
+    }
+
+    @MainActor
+    func testModeSwitchInvalidatesOldCompletionsAndClearsBothCaches() {
+        let model = DockModel()
+        model.snapshot = .preview
+        let oldRevision = model.pairingRevision
+        let oldCloudRevision = model.cloud.revision
+        model.cloud.clear()
+        XCTAssertGreaterThan(model.pairingRevision, oldRevision)
+        XCTAssertGreaterThan(model.cloud.revision, oldCloudRevision)
+        XCTAssertNil(model.snapshot)
+        XCTAssertNil(model.cloud.snapshot)
+        XCTAssertNil(SnapshotStore.load())
+        XCTAssertNil(CloudCache.load())
+    }
+
     private let fixture = Data("""
     {"schemaVersion":1,"generatedAt":"2026-10-13T10:00:00Z","demo":false,"providers":[{"id":"codex","name":"Codex","plan":null,"state":"unavailable","source":"codexbar","message":null,"observedAt":null,"windows":[{"id":"primary","label":"Session","remainingPercent":null,"resetsAt":null}]}]}
     """.utf8)
@@ -38,6 +162,35 @@ final class ContractTests: XCTestCase {
         let observed = try XCTUnwrap(provider.observedAt)
         XCTAssertFalse(provider.isStale(at: observed.addingTimeInterval(900)))
         XCTAssertTrue(provider.isStale(at: observed.addingTimeInterval(901)))
+    }
+
+    func testDisplayWindowsNeverGaugeLookupFailuresAndPreserveWindows() {
+        let reset = Date(timeIntervalSince1970: 1234)
+        let windows = [QuotaWindow(id: "session", label: "Session", remainingPercent: 0, resetsAt: reset),
+                       QuotaWindow(id: "weekly", label: "Weekly", remainingPercent: 72, resetsAt: nil)]
+        for state in [ProviderState.available, .unavailable, .error] {
+            let provider = Provider(id: .codex, name: "Codex", plan: nil, state: state,
+                                    source: .codexbar, message: nil, observedAt: reset, windows: windows)
+            XCTAssertEqual(provider.displayWindows.map(\.id), ["session", "weekly"])
+            XCTAssertEqual(provider.displayWindows.first?.resetsAt, reset)
+            XCTAssertEqual(provider.observedAt, reset)
+            if state == .available {
+                XCTAssertEqual(provider.displayWindows, windows)
+            } else {
+                XCTAssertTrue(provider.displayWindows.allSatisfy { $0.clampedRemaining == nil })
+            }
+        }
+    }
+
+    func testForegroundRefreshDefaultsOnAndHonorsManualOnly() throws {
+        let suite = "QuotaDockTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(RefreshSettings.foregroundEnabled(in: defaults))
+        defaults.set(false, forKey: RefreshSettings.foregroundKey)
+        XCTAssertFalse(RefreshSettings.foregroundEnabled(in: defaults))
+        defaults.set(true, forKey: RefreshSettings.foregroundKey)
+        XCTAssertTrue(RefreshSettings.foregroundEnabled(in: defaults))
     }
 
     func testRejectsUnsupportedVersionOversizeAndBadDates() {

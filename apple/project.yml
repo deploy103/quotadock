@@ -56,13 +56,15 @@ targets:
       properties:
         CFBundleDisplayName: QuotaDock
         KeychainGroup: $(KEYCHAIN_GROUP)
+        CloudKeychainGroup: $(AppIdentifierPrefix)$(BUNDLE_PREFIX).cloud
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     entitlements:
       path: Generated/iOS.entitlements
       properties:
+        com.apple.developer.applesignin: [Default]
         com.apple.security.application-groups: [$(APP_GROUP)]
-        keychain-access-groups: [$(KEYCHAIN_GROUP)]
+        keychain-access-groups: [$(KEYCHAIN_GROUP), $(AppIdentifierPrefix)$(BUNDLE_PREFIX).cloud]
     dependencies:
       - target: QuotaDockWidgets
         embed: true
@@ -71,19 +73,15 @@ targets:
   QuotaDockWidgets:
     templates: [shared, widget]
     platform: iOS
-    sources: [Shared/Bridge.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_PREFIX).widgets
     info:
       path: Generated/Widgets-Info.plist
-      properties:
-        KeychainGroup: $(KEYCHAIN_GROUP)
     entitlements:
       path: Generated/Widgets.entitlements
       properties:
         com.apple.security.application-groups: [$(APP_GROUP)]
-        keychain-access-groups: [$(KEYCHAIN_GROUP)]
   QuotaDockWatch:
     templates: [shared]
     type: application

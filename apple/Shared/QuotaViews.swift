@@ -1,8 +1,21 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 enum DockTheme {
     static let graphite = Color(red: 0.08, green: 0.10, blue: 0.11)
+    #if os(iOS)
+    static let background = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(red: 0.08, green: 0.10, blue: 0.11, alpha: 1) : UIColor(red: 0.98, green: 0.97, blue: 0.95, alpha: 1)
+    })
+    static let mint = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(red: 0.43, green: 0.94, blue: 0.74, alpha: 1) : UIColor(red: 36/255, green: 107/255, blue: 75/255, alpha: 1)
+    })
+    #else
+    static let background = graphite
     static let mint = Color(red: 0.43, green: 0.94, blue: 0.74)
+    #endif
 }
 
 struct RemainingBar: View {
@@ -12,16 +25,16 @@ struct RemainingBar: View {
             HStack {
                 Text(window.label).lineLimit(1)
                 Spacer()
-                Text(window.clampedRemaining.map { "\(Int($0))% left" } ?? "Unknown")
+                Text(window.clampedRemaining.map { "\(Int($0))% left" } ?? "Unknown").monospacedDigit()
             }.font(.caption)
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.12))
-                    if let remaining = window.clampedRemaining {
+            if let remaining = window.clampedRemaining {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.primary.opacity(0.10))
                         Capsule().fill(DockTheme.mint).frame(width: geometry.size.width * remaining / 100)
                     }
-                }
-            }.frame(height: 9)
+                }.frame(height: 12).accessibilityHidden(true)
+            }
             if let reset = window.resetsAt {
                 Text("Reset: \(reset.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -48,11 +61,13 @@ struct ProviderCard: View {
             }
             if provider.state != .available { Text("Usage unavailable").foregroundStyle(.secondary) }
             if provider.isStale() { Text(provider.observedAt == nil ? "Not observed" : "Stale · over 15 minutes old").font(.caption).foregroundStyle(.orange) }
-            ForEach(provider.windows) { RemainingBar(window: $0) }
+            ForEach(provider.displayWindows) { RemainingBar(window: $0) }
             if provider.windows.isEmpty { Text("Remaining unknown").font(.caption) }
             if let observed = provider.observedAt {
                 Text("Observed \(observed.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary)
             }
-        }.padding().background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        }.padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { Divider() }
     }
 }

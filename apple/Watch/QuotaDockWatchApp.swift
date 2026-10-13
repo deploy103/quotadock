@@ -16,14 +16,14 @@ struct WatchDashboard: View {
                 if let snapshot {
                     ForEach(snapshot.providers) { ProviderCard(provider: $0, demo: snapshot.demo) }
                 } else { Text("No readings. Pair and refresh on iPhone, then open both apps.") }
-                Text("Last iPhone transfer · no direct Watch network fetch").font(.caption2).foregroundStyle(.secondary)
+                Text("Last iPhone transfer · first account per provider only · no direct Watch network fetch").font(.caption2).foregroundStyle(.secondary)
                 Button(demo ? "Leave demo" : "Explore demo") {
                     demo.toggle()
                     snapshot = demo ? .preview : SnapshotStore.load()
                 }
                 Button("Reload local cache") { if !demo { snapshot = SnapshotStore.load() } }
             }
-        }.background(DockTheme.graphite).tint(DockTheme.mint)
+        }.background(DockTheme.graphite).tint(DockTheme.mint).preferredColorScheme(.dark)
             .task { WatchSync.shared.start() }
             .onReceive(NotificationCenter.default.publisher(for: .snapshotUpdated).receive(on: RunLoop.main)) { _ in
                 if !demo { snapshot = SnapshotStore.load() }

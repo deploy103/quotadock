@@ -13,19 +13,8 @@ struct QuotaTimeline: TimelineProvider {
         completion(QuotaEntry(date: Date(), snapshot: context.isPreview ? .preview : SnapshotStore.load(), cached: !context.isPreview))
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<QuotaEntry>) -> Void) {
-        Task {
-            var snapshot = SnapshotStore.load()
-            var cached = true
-            #if os(iOS)
-            if let pairing = try? PairingStore.load(), let fetched = try? await BridgeClient().fetch(pairing) {
-                snapshot = fetched
-                try? SnapshotStore.save(fetched)
-                cached = false
-            }
-            #endif
-            let entry = QuotaEntry(date: Date(), snapshot: snapshot, cached: cached)
-            completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(15 * 60))))
-        }
+        let entry = QuotaEntry(date: Date(), snapshot: SnapshotStore.load(), cached: true)
+        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(15 * 60))))
     }
 }
 
@@ -35,17 +24,27 @@ struct QuotaWidgetView: View {
     @Environment(\.widgetFamily) private var family
     private var provider: Provider? { entry.snapshot?.providers.first { $0.id == providerID } }
     private var isDemo: Bool { entry.snapshot?.demo == true || provider?.source == .demo }
+    private var visibleWindows: [QuotaWindow] {
+        let windows = provider?.displayWindows ?? []
+        #if os(iOS)
+        if family == .systemMedium { return windows }
+        #endif
+        return Array(windows.prefix(1))
+    }
     var body: some View {
         Group {
             if family == .accessoryCircular {
                 VStack(spacing: 2) {
                     if isDemo { Text("DEMO").font(.caption2) }
                     else { ProviderIcon(id: providerID, size: 14) }
-                    Text(provider?.windows.first?.clampedRemaining.map { "\(Int($0))%" } ?? "—").font(.headline)
-                    Text(provider?.isStale(at: entry.date) == true ? "Stale" : "left").font(.caption2)
+                    Text(provider?.displayWindows.first?.clampedRemaining.map { "\(Int($0))%" } ?? "?").font(.headline)
+                    Text(provider?.displayWindows.first?.clampedRemaining == nil ? "Unknown" : (provider?.isStale(at: entry.date) == true ? "Stale" : "left")).font(.caption2)
+                    if let observed = provider?.observedAt {
+                        Text(observed.formatted(date: .omitted, time: .shortened)).font(.system(size: 9))
+                    }
                 }
             } else if family == .accessoryInline {
-                Text("\(isDemo ? "DEMO " : "")\(providerID.displayName): \(provider?.windows.first?.clampedRemaining.map { "\(Int($0))% left" } ?? "unknown")\(provider?.isStale(at: entry.date) == true ? " · stale" : "")")
+                Text("\(isDemo ? "DEMO " : "")\(providerID.displayName): \(provider?.displayWindows.first?.clampedRemaining.map { "\(Int($0))% left" } ?? "unknown")\(provider?.isStale(at: entry.date) == true ? " · stale" : "")\(provider?.observedAt.map { " · \($0.formatted(date: .omitted, time: .shortened))" } ?? "")")
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
@@ -57,24 +56,27 @@ struct QuotaWidgetView: View {
                     Text(provider?.plan ?? "Plan unknown").font(.caption2).foregroundStyle(.secondary)
                     if let provider {
                         if provider.state != .available { Text("Unavailable").font(.caption2) }
-                        if let window = provider.windows.first {
-                            RemainingBar(window: QuotaWindow(id: window.id, label: window.label,
-                                remainingPercent: window.remainingPercent,
-                                resetsAt: family == .accessoryRectangular ? nil : window.resetsAt))
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(visibleWindows) { window in
+                                RemainingBar(window: QuotaWindow(id: window.id, label: window.label,
+                                    remainingPercent: window.remainingPercent,
+                                    resetsAt: family == .accessoryRectangular ? nil : window.resetsAt))
+                            }
                         }
-                        else { Text("Remaining unknown").font(.caption) }
+                        if provider.windows.isEmpty { Text("Remaining unknown").font(.caption) }
                         if provider.isStale(at: entry.date) { Text("Stale / not observed").font(.caption2) }
-                        if family != .accessoryRectangular, let observed = provider.observedAt {
+                        if let observed = provider.observedAt {
                             Text("Observed \(observed.formatted(date: .omitted, time: .shortened))").font(.caption2)
                         }
                     } else { Text("Open iPhone to pair").font(.caption) }
                     if family != .accessoryRectangular {
-                        Text(entry.cached ? "Cached reading" : "Bridge reading").font(.caption2).foregroundStyle(.secondary)
+                        Text("Cached · first account").font(.caption2).foregroundStyle(.secondary)
                         if providerID == .codex { Text("Not total ChatGPT usage").font(.caption2) }
                     }
                 }
             }
-        }.containerBackground(DockTheme.graphite, for: .widget)
+        }.containerBackground(DockTheme.background, for: .widget)
+            .accessibilityHint("\(providerID.displayName), first cached account. Observed \(provider?.observedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "never").")
     }
 }
 
@@ -89,7 +91,7 @@ struct ProviderWidget: Widget {
             QuotaWidgetView(entry: entry, providerID: providerID)
         }
         .configurationDisplayName("\(providerID.displayName) remaining")
-        .description("Plan and first window remaining. Open QuotaDock for every window.")
+        .description("Cached first account per provider. Open QuotaDock for all accounts and windows.")
         #if os(iOS)
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryCircular, .accessoryInline])
         #else
@@ -106,7 +108,7 @@ struct OverviewWidget: Widget {
                 HStack {
                     Text("QuotaDock · remaining").font(.caption).bold()
                     Spacer()
-                    Text(entry.snapshot?.demo == true ? "DEMO" : "First windows").font(.caption2)
+                    Text(entry.snapshot?.demo == true ? "DEMO" : "First accounts").font(.caption2)
                 }
                 ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.rawValue) { id in
                     let provider = entry.snapshot?.providers.first { $0.id == id }
@@ -120,6 +122,9 @@ struct OverviewWidget: Widget {
                                 Spacer(minLength: 0)
                                 if provider?.isStale(at: entry.date) == true { Text("stale").foregroundStyle(.orange) }
                             }.font(.caption2)
+                            if let observed = provider?.observedAt {
+                                Text("Observed \(observed.formatted(date: .omitted, time: .shortened))").font(.caption2)
+                            }
                             if let remaining {
                                 ProgressView(value: remaining, total: 100).tint(DockTheme.mint)
                             } else { Text("Quota unknown").font(.caption2).foregroundStyle(.secondary) }
@@ -127,7 +132,7 @@ struct OverviewWidget: Widget {
                         Text(remaining.map { "\(Int($0))%" } ?? "—").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
                     }
                 }
-            }.containerBackground(DockTheme.graphite, for: .widget)
+            }.containerBackground(DockTheme.background, for: .widget)
         }
         .configurationDisplayName("All AI allowances")
         .description("First quota window per provider. Codex is not total ChatGPT usage. Open the app for all windows and reset times.")

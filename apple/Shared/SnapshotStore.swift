@@ -1,5 +1,12 @@
 import Foundation
 
+enum RefreshSettings {
+    static let foregroundKey = "foregroundAutoRefresh"
+    static func foregroundEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: foregroundKey) == nil || defaults.bool(forKey: foregroundKey)
+    }
+}
+
 enum SnapshotStore {
     private static var url: URL? {
         guard let group = Bundle.main.object(forInfoDictionaryKey: "AppGroup") as? String else { return nil }
@@ -8,7 +15,7 @@ enum SnapshotStore {
     }
     static func load() -> Snapshot? {
         guard let url, let data = try? Data(contentsOf: url) else { return nil }
-        return try? Snapshot.decode(data)
+        return try? Snapshot.decode(data).sanitized
     }
     static func save(_ snapshot: Snapshot) throws {
         guard let url else { throw SnapshotError.invalid }
