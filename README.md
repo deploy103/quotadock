@@ -113,12 +113,14 @@ sessions/grants and cascades owned records; backups have separate expiry.
 Node.js 22를 설치하고 저장소 루트에서 실행하세요. 브리지 자체에는 npm 의존성이 없습니다.
 
 ```sh
-git clone https://github.com/quotadock-dev/quotadock.git
+git clone --branch feat/quota-dock https://github.com/quotadock-dev/quotadock.git
 cd quotadock
 node bridge/cli.mjs init
 node bridge/cli.mjs status --demo
 node bridge/cli.mjs serve --demo
 ```
+
+현재 소스는 [PR #2](https://github.com/quotadock-dev/quotadock/pull/2)의 `feat/quota-dock` 브랜치에 있습니다. `main` 병합 전에는 위 브랜치를 지정해야 합니다.
 
 `init`는 로컬 페어링 토큰을 생성합니다. **토큰을 터미널 로그, 이슈, 스크린샷에 공유하지 마세요.** 웹 화면은 같은 컴퓨터의 `http://127.0.0.1:8787`에서 확인합니다. Demo 표시는 실제 계정 사용량이 아닙니다.
 

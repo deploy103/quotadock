@@ -2,6 +2,11 @@
 
 Run Node 22+ with CodexBar installed and authenticated **locally**:
 
+The cloud collector requires POSIX user IDs and private file permissions
+(macOS/Linux). Windows credential-file/ACL support is not implemented; do not
+disable the ownership checks to make it run. Live provider availability still
+depends on the installed CodexBar build and its supported credential sources.
+
 ```sh
 node bridge/cloud.mjs pair https://YOUR-TRUSTED-QUOTADOCK-SERVER
 node bridge/cloud.mjs run
