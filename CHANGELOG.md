@@ -10,6 +10,11 @@ imply a signed binary release or App Store availability.
 - Source clients for a web dashboard, iPhone, widgets, and Apple Watch.
 - Private HTTPS device connection model; provider sessions remain on the host.
 - Repository-local read-only inspection skills and public contribution workflows.
+- Bounded cloud cursor traversal with distinct account slots and explicit partial offline caches.
+- Streamed response limits and cancellation that preserve the last usable observation.
+- Shared widget/Watch freshness and empty-cache presentation, plus large-text layouts.
+- Fractional remaining allowances stay distinct from zero on every native surface.
+- Read-only collector diagnostics with fixed non-secret errors.
 
 No App Store/TestFlight distribution, real-time background refresh guarantee,
 or account-independent provider availability is promised.
