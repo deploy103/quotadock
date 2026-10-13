@@ -96,7 +96,15 @@ struct DockView: View {
     @State private var showCloudPreview = false
     @State private var showBatchPreview = false
     @State private var showSurfacePreview = false
-    @State private var surfacePreview = "widgets"
+    private var surfacePreview: String? {
+        #if DEBUG
+        return ["widgets", "widgets-overview", "widgets-accessories", "watch", "watch-stale", "accessibility"].first {
+            ProcessInfo.processInfo.arguments.contains("--\($0)-preview")
+        }
+        #else
+        return nil
+        #endif
+    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -140,7 +148,7 @@ struct DockView: View {
                 }
                 .fullScreenCover(isPresented: $showSurfacePreview) {
                     #if DEBUG
-                    switch surfacePreview {
+                    switch surfacePreview ?? "widgets" {
                     case "accessibility": QuotaAccessibilityPreview()
                     case "watch", "watch-stale": WatchSurfacePreview()
                     default: WidgetSurfacePreview()
@@ -152,12 +160,7 @@ struct DockView: View {
                     showSettings = ProcessInfo.processInfo.arguments.contains("--settings-preview")
                     showCloudPreview = ProcessInfo.processInfo.arguments.contains("--cloud-preview")
                     showBatchPreview = ProcessInfo.processInfo.arguments.contains("--batch-preview")
-                    if let surface = ["widgets", "widgets-overview", "widgets-accessories", "watch", "watch-stale", "accessibility"].first(where: {
-                        ProcessInfo.processInfo.arguments.contains("--\($0)-preview")
-                    }) {
-                        surfacePreview = surface
-                        showSurfacePreview = true
-                    }
+                    showSurfacePreview = surfacePreview != nil
                     #endif
                 }
         }

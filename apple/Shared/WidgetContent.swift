@@ -53,8 +53,8 @@ struct ProviderWidgetContent: View {
                     } else { Text("No cached quota").font(.caption) }
                     Spacer(minLength: 0)
                     Text(freshness).font(.caption2).foregroundStyle(.secondary).lineLimit(surface == .medium ? 1 : 2)
-                    Text(surface == .medium ? "Cached · first account · first 2 windows" : "Cached · first account / window")
-                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
+                    Text(provider == nil ? "No stored observation" : surface == .medium ? "Cached · first account · first 2 windows" : "Cached · first account / window")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(surface == .medium ? 1 : 2).minimumScaleFactor(0.85)
                     if providerID == .codex && surface == .medium {
                         Text("Not total ChatGPT usage").font(.caption2).foregroundStyle(.secondary)
                     }
