@@ -90,9 +90,10 @@ final class CloudSessionRenewalTests: XCTestCase {
         }
 
         let model = CloudModel(), accountA = original()
-        var accountB = original()
-        accountB.token = String(repeating: "e", count: 43)
-        accountB.refreshToken = String(repeating: "f", count: 43)
+        let accountB = CloudSession(baseURL: accountA.baseURL,
+            token: String(repeating: "e", count: 43), expiresAt: accountA.expiresAt,
+            refreshToken: String(repeating: "f", count: 43), familyId: UUID(),
+            refreshExpiresAt: accountA.refreshExpiresAt)
         let responseA = try response(accountA)
         var replyB = try XCTUnwrap(JSONSerialization.jsonObject(with: response(accountB)) as? [String: Any])
         replyB["sessionToken"] = String(repeating: "g", count: 43)
@@ -117,9 +118,10 @@ final class CloudSessionRenewalTests: XCTestCase {
         model.session = accountA
         let firstA = Task { @MainActor in
             do {
-                resultA = .success(try await model.authorizedClient(fetchRenewal: { _ in
+                let client = try await model.authorizedClient(fetchRenewal: { _ in
                     try await transportA.fetch(started: startedA)
-                }, save: { saves.append($0) }).token)
+                }, save: { saves.append($0) })
+                resultA = .success(try XCTUnwrap(client.token))
             } catch { resultA = .failure(error) }
             completedA.fulfill()
         }
@@ -135,10 +137,11 @@ final class CloudSessionRenewalTests: XCTestCase {
         model.session = accountB
         firstB = Task { @MainActor in
             do {
-                resultB = .success(try await model.authorizedClient(fetchRenewal: { _ in
+                let client = try await model.authorizedClient(fetchRenewal: { _ in
                     sendsB += 1
                     return try await transportB.fetch(started: startedB)
-                }, save: { saves.append($0) }).token)
+                }, save: { saves.append($0) })
+                resultB = .success(try XCTUnwrap(client.token))
             } catch { resultB = .failure(error) }
             completedB.fulfill()
         }
@@ -159,10 +162,11 @@ final class CloudSessionRenewalTests: XCTestCase {
         secondB = Task { @MainActor in
             enteredSecondB.fulfill()
             do {
-                resultSecondB = .success(try await model.authorizedClient(fetchRenewal: { _ in
+                let client = try await model.authorizedClient(fetchRenewal: { _ in
                     secondTransportCalls += 1
                     throw SnapshotError.invalid
-                }, save: { saves.append($0) }).token)
+                }, save: { saves.append($0) })
+                resultSecondB = .success(try XCTUnwrap(client.token))
             } catch { resultSecondB = .failure(error) }
             if !releasedB { prematureSecondB.fulfill() }
             completedSecondB.fulfill()
