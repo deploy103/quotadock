@@ -50,23 +50,36 @@ final class ContractTests: XCTestCase {
     }
 
     func testCloudDatesAcceptServerBoundaryAndOffsetWithoutChangingInstant() throws {
-        let timestamp = "2026-10-13T10:00:00.123" + String(repeating: "0", count: 40) + "Z"
-        XCTAssertEqual(timestamp.utf8.count, 64)
-        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: cloudFixture) as? [String: Any])
-        var accounts = try XCTUnwrap(root["accounts"] as? [[String: Any]])
-        accounts[0]["observedAt"] = timestamp
-        var windows = try XCTUnwrap(accounts[0]["windows"] as? [[String: Any]])
-        windows[0]["resetsAt"] = "2026-10-13T19:00:00.123+09:00"
-        accounts[0]["windows"] = windows
-        root["accounts"] = accounts
-        let snapshot = try CloudSnapshot.decode(JSONSerialization.data(withJSONObject: root))
-        let observation = try XCTUnwrap(snapshot.accounts[0].observedAt)
-        let reset = try XCTUnwrap(snapshot.accounts[0].windows[0].resetsAt)
-        XCTAssertEqual(observation.timeIntervalSince1970, 1791885600.123, accuracy: 0.001)
-        XCTAssertEqual(reset.timeIntervalSince1970, 1791885600.123, accuracy: 0.001)
-        let cached = try CloudSnapshot.decode(snapshot.cacheData())
-        XCTAssertEqual(cached.accounts[0].observedAt, observation)
-        XCTAssertEqual(cached.accounts[0].windows[0].resetsAt, reset)
+        for (milliseconds, expected) in [("123", 1791885600.123), ("000", 1791885600.0), ("999", 1791885600.999)] {
+            let timestamp = "2026-10-13T10:00:00.\(milliseconds)" + String(repeating: "9", count: 40) + "Z"
+            XCTAssertEqual(timestamp.utf8.count, 64)
+            var root = try XCTUnwrap(JSONSerialization.jsonObject(with: cloudFixture) as? [String: Any])
+            var accounts = try XCTUnwrap(root["accounts"] as? [[String: Any]])
+            accounts[0]["observedAt"] = timestamp
+            var windows = try XCTUnwrap(accounts[0]["windows"] as? [[String: Any]])
+            windows[0]["resetsAt"] = "2026-10-13T19:00:00.\(milliseconds)+09:00"
+            accounts[0]["windows"] = windows
+            root["accounts"] = accounts
+            let snapshot = try CloudSnapshot.decode(JSONSerialization.data(withJSONObject: root))
+            let observation = try XCTUnwrap(snapshot.accounts[0].observedAt)
+            let reset = try XCTUnwrap(snapshot.accounts[0].windows[0].resetsAt)
+            XCTAssertEqual(observation.timeIntervalSince1970, expected, accuracy: 0.0001)
+            XCTAssertEqual(reset.timeIntervalSince1970, expected, accuracy: 0.0001)
+            let cached = try CloudSnapshot.decode(snapshot.cacheData())
+            XCTAssertEqual(cached.accounts[0].observedAt, observation)
+            XCTAssertEqual(cached.accounts[0].windows[0].resetsAt, reset)
+            var sharedRoot = try XCTUnwrap(JSONSerialization.jsonObject(with: snapshot.smallSurfaceSnapshot.encoded()) as? [String: Any])
+            sharedRoot["generatedAt"] = timestamp
+            let shared = try Snapshot.decode(JSONSerialization.data(withJSONObject: sharedRoot))
+            XCTAssertEqual(shared.generatedAt.timeIntervalSince1970, expected, accuracy: 0.0001)
+            XCTAssertEqual(shared.providers[0].observedAt, observation)
+            for invalid in [timestamp.replacingOccurrences(of: "Z", with: "9Z"), timestamp + "\n",
+                            timestamp.replacingOccurrences(of: "T", with: "Ｔ")] {
+                accounts[0]["observedAt"] = invalid
+                root["accounts"] = accounts
+                XCTAssertThrowsError(try CloudSnapshot.decode(JSONSerialization.data(withJSONObject: root)))
+            }
+        }
     }
 
     func testCloudCacheExportsOnlySanitizedQuotaAndOriginalTime() throws {

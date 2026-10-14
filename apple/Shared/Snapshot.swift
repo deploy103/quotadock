@@ -12,6 +12,26 @@ struct Snapshot: Codable, Equatable {
     // weekly and pro are used by the native preview, not the bridge's three slots.
     private static let windowIDs: Set<String> = ["primary", "secondary", "tertiary", "weekly", "pro"]
 
+    static func date(from text: String) throws -> Date {
+        guard text.utf8.count <= 64, text.utf8.allSatisfy({ $0 < 128 }),
+              text.range(of: #"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})\z"#,
+                         options: .regularExpression) != nil else { throw SnapshotError.invalid }
+        var normalized = text
+        if let dot = text.firstIndex(of: ".") {
+            let start = text.index(after: dot)
+            let end = text[start...].firstIndex(where: { !$0.isNumber }) ?? text.endIndex
+            // The server's Date contract truncates to milliseconds. ICU can
+            // silently drop the entire fraction when given many digits.
+            let milliseconds = String(text[start..<end].prefix(3)).padding(toLength: 3, withPad: "0", startingAt: 0)
+            normalized.replaceSubrange(start..<end, with: milliseconds)
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = normalized.contains(".")
+            ? [.withInternetDateTime, .withFractionalSeconds] : [.withInternetDateTime]
+        guard let result = formatter.date(from: normalized) else { throw SnapshotError.invalid }
+        return result
+    }
+
     static func decode(_ data: Data) throws -> Snapshot {
         guard data.count <= 256 * 1024 else { throw SnapshotError.invalid }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -28,12 +48,7 @@ struct Snapshot: Codable, Equatable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: text) { return date }
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: text) else { throw SnapshotError.invalid }
-            return date
+            return try date(from: text)
         }
         let snapshot = try decoder.decode(Snapshot.self, from: data)
         guard snapshot.schemaVersion == 1,
