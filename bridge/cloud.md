@@ -43,8 +43,9 @@ node bridge/cloud.mjs once
 ```
 
 Use your deployment's trusted HTTPS origin (no path, credentials, or query).
-TLS verification remains enabled and redirects are never followed. Enter the
-printed eight-character code on the phone and explicitly confirm selected slots.
+Requests explicitly require certificate verification even if the inherited
+`NODE_TLS_REJECT_UNAUTHORIZED` setting is `0`; redirects are never followed.
+Enter the printed eight-character code on the phone and explicitly confirm selected slots.
 The CLI never accepts Apple sessions or provider credentials. Its scoped grant
 is stored exclusively in `~/.config/quotadock-cloud/collector.json` (0600 in
 a private 0700 directory). Do not copy it into issues, logs or source control.
@@ -103,3 +104,52 @@ for manual-only collection. This continues while the computer is online even
 after the phone session expires; it is not iOS background polling. Run only one
 worker per grant/installation to avoid duplicate upstream calls. No demo/fabricated
 observations are used.
+
+Within one bounded operation, transient transport failures and HTTP 429/502/503/
+504 may retry up to three sends. The original automatic request key/body and
+sanitized completion body remain unchanged; retrying a completion never runs
+CodexBar again. Operation time is at most 45 seconds, each HTTP request at most
+15 seconds, and grant/job expiry bounds it further. Retry-After waits longer than
+the internal retry budget are not shortened. 401/403, malformed replies, invalid
+bindings and TLS validation failures are not automatically retried.
+
+## Optional user-service setup
+
+After explicit pairing, mapping and local `doctor` checks, the renderer prints
+a service definition pinned to this checkout, the running Node executable and
+your trusted CodexBar binary. It **never installs, enables, starts or pairs** a
+service and never reads/copies private grant files or the invoking environment.
+Run as your ordinary user, not root; do not place these in a system service.
+
+```sh
+# Inspect output first. Replace the binary path with your confirmed executable.
+node bridge/service.mjs launchd --codexbar /absolute/path/to/codexbar
+node bridge/service.mjs systemd --codexbar /absolute/path/to/codexbar
+```
+
+On macOS, save inspected LaunchAgent output to
+`~/Library/LaunchAgents/com.quotadock.collector.plist`, then use your user domain:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.quotadock.collector.plist"
+# Stop before revoking, changing mappings, or repairing configuration:
+launchctl bootout "gui/$(id -u)/com.quotadock.collector"
+```
+
+On Linux, save inspected output to
+`~/.config/systemd/user/quotadock-collector.service`, then:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now quotadock-collector.service
+systemctl --user stop quotadock-collector.service
+```
+
+Neither definition restarts after a fatal exit. Repair expiry/revocation,
+permissions or bindings before explicitly starting it again. Transient retries
+are internal to the collector. User-login/service-manager availability, installed
+CodexBar credential support, and an awake online computer still matter. This
+does not enable user lingering or promise collection while the host sleeps.
+Regenerate after moving the checkout or replacing Node/CodexBar; pinned paths
+and service environments can differ from your interactive shell. No tokens go
+into a unit/plist. Service-manager/device runs remain release-gated until tested.

@@ -21,24 +21,58 @@ export function accounts(value) {
   if (!Array.isArray(value) || !value.length || value.length > 50 || value.some(a => !uuid.test(a?.id) || !Object.hasOwn(providers, a?.provider)) || value.filter(a => a.provider === 'gemini').length > 1 || new Set(value.map(a => a.id.toLowerCase())).size !== value.length) throw Error('unsupported_slots');
   return value.map(({ id, provider }) => ({ id: id.toLowerCase(), provider }));
 }
-export function api(base, path, token, body) {
+const transientCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH']);
+function failure(message, retryable = false, retryAfter = 0) {
+  return Object.assign(Error(message), { retryable, retryAfter });
+}
+function retryDelay(value) {
+  if (value === undefined) return 0;
+  if (typeof value !== 'string' || value.length > 128) return Infinity;
+  const ms = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(ms) && ms <= 2000 ? Math.max(0, ms) : Infinity;
+}
+export function api(base, path, token, body, { requestFn = request, timeoutMs = 15000 } = {}) {
+  // The injection seam changes only I/O, never origin or TLS validation/options.
+  const url = new URL(path, origin(base));
+  if (url.origin !== origin(base)) throw Error('configuration');
+  const wire = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
-    const req = request(new URL(path, origin(base)), { method: body === undefined ? 'GET' : 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) } }, res => {
+    const transportFailure = e => reject(failure('service', transientCodes.has(e?.code)));
+    const req = requestFn(url, { rejectUnauthorized: true, method: body === undefined ? 'GET' : 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) } }, res => {
+      res.on('error', transportFailure);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        reject(failure(res.statusCode === 401 ? 'revoked' : res.statusCode === 403 ? 'forbidden' : 'service', [429, 502, 503, 504].includes(res.statusCode), retryDelay(res.headers?.['retry-after'])));
+        res.destroy();
+        return;
+      }
       let size = 0; const chunks = [];
-      res.on('data', chunk => { size += chunk.length; if (size > 65536) req.destroy(Error('response')); else chunks.push(chunk); });
-      res.on('error', reject);
+      res.on('data', chunk => { size += chunk.length; if (size > 65536) { reject(failure('response')); req.destroy(); } else chunks.push(chunk); });
+      res.on('aborted', () => reject(failure('service', true)));
       res.on('end', () => {
         try {
-          if (res.statusCode < 200 || res.statusCode >= 300) throw Error(res.statusCode === 401 ? 'revoked' : res.statusCode === 403 ? 'forbidden' : 'service');
           resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-        } catch (e) { reject(e); }
+        } catch { reject(failure('response')); }
       });
     });
     // Absolute deadline, not an inactivity timeout; redirects are never followed.
-    const timer = setTimeout(() => req.destroy(Error('timeout')), 15000);
-    req.on('close', () => clearTimeout(timer)); req.on('error', reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
+    const timer = setTimeout(() => { reject(failure('service', true)); req.destroy(); }, Math.max(1, Math.min(15000, timeoutMs)));
+    req.on('close', () => clearTimeout(timer)); req.on('error', transportFailure);
+    req.end(wire);
   });
+}
+async function retryAPI(base, path, token, body, deadline, requestFn) {
+  // Serialize once: retries cannot mint a key or mutate sanitized observations.
+  const stable = body === undefined ? undefined : JSON.stringify(body);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (Date.now() >= deadline) throw failure('service');
+    try {
+      return await api(base, path, token, stable === undefined ? undefined : JSON.parse(stable), { requestFn, timeoutMs: deadline - Date.now() });
+    } catch (e) {
+      const delay = Math.max(250 * (attempt + 1), e.retryAfter ?? 0);
+      if (!e.retryable || attempt === 2 || Date.now() + delay >= deadline) throw e;
+      await wait(delay);
+    }
+  }
 }
 async function privateDirectory(file, create = true) {
   if (typeof process.getuid !== 'function' || !constants.O_NOFOLLOW) throw Error('permissions');
@@ -130,26 +164,37 @@ export function observations(slots, snapshot) {
     return { accountId: a.id, provider: a.provider, plan: p.plan, state: p.state, source: 'codexbar', observedAt: p.observedAt, windows: p.windows.map(w => ({ id: w.id, label: w.label, remainingPercent: w.remainingPercent, resetsAt: w.resetsAt })) };
   });
 }
-export async function runOnce(c, { automatic = false } = {}) {
+export async function runOnce(c, { automatic = false, requestFn = request, operationTimeoutMs = 45000 } = {}) {
+  if (!Number.isFinite(operationTimeoutMs) || (c.expiresAt !== undefined && !Number.isFinite(c.expiresAt))) throw Error('configuration');
+  const grantExpiry = c.expiresAt ?? Infinity;
+  if (Date.now() >= grantExpiry) throw Error('grant_expired');
+  const deadline = Math.min(grantExpiry, Date.now() + Math.max(1, Math.min(45000, operationTimeoutMs)));
+  origin(c.base);
+  const call = (path, body, until = deadline) => retryAPI(c.base, path, c.collectorToken, body, Math.min(deadline, until), requestFn);
   validateBindings(c.accounts, c.bindings ?? {});
-  let { job } = await api(c.base, '/v2/collector/jobs/next', c.collectorToken);
+  let { job } = await call('/v2/collector/jobs/next');
   if (!job && automatic) {
     try {
-      const result = await api(c.base, '/v2/collector/refresh', c.collectorToken, { accountIds: c.accounts.map(a => a.id), mode: 'auto', idempotencyKey: randomUUID() });
-      if (result.status === 'pending') ({ job } = await api(c.base, '/v2/collector/jobs/next', c.collectorToken));
+      const result = await call('/v2/collector/refresh', { accountIds: c.accounts.map(a => a.id), mode: 'auto', idempotencyKey: randomUUID() });
+      if (result.status === 'pending') ({ job } = await call('/v2/collector/jobs/next'));
     } catch (e) { if (e.message === 'forbidden') return; throw e; }
   }
   if (!job) return;
   const slots = accounts(job.accounts);
-  if (!uuid.test(job.id) || slots.some(a => !c.accounts.some(g => g.id === a.id && g.provider === a.provider)) || !Array.isArray(job.accountIds) || job.accountIds.length !== slots.length || job.accountIds.some(id => !slots.some(a => a.id === id))) throw Error('response');
+  const ids = Array.isArray(job.accountIds) ? job.accountIds.map(id => typeof id === 'string' ? id.toLowerCase() : null) : [];
+  if (!uuid.test(job.id) || slots.some(a => !c.accounts.some(g => g.id === a.id && g.provider === a.provider)) ||
+      ids.length !== slots.length || new Set(ids).size !== slots.length || ids.some(id => !slots.some(a => a.id === id))) throw Error('response');
   const issued = Date.parse(job.createdAt), expires = Date.parse(job.expiresAt);
   if (!Number.isFinite(issued) || !Number.isFinite(expires) || issued > Date.now() + 5000) throw Error('response');
-  await wait(Math.max(0, Math.floor(issued / 1000) * 1000 + 1001 - Date.now()));
-  if (Date.now() >= expires) return;
+  const until = Math.min(expires, deadline);
+  const delay = Math.max(0, Math.floor(issued / 1000) * 1000 + 1001 - Date.now());
+  if (Date.now() + delay >= until) return;
+  await wait(delay);
+  if (Date.now() >= until) return;
   const bindings = Object.fromEntries(slots.filter(a => c.bindings?.[a.id]).map(a => [a.id, c.bindings[a.id]]));
-  const snapshot = await collectAccounts(slots, bindings, { binary: process.env.QUOTADOCK_CODEXBAR_BIN || 'codexbar' });
-  if (Date.now() >= expires) return;
-  await api(c.base, `/v2/collector/refresh/${job.id}/complete`, c.collectorToken, { observations: observations(slots, snapshot) });
+  const snapshot = await collectAccounts(slots, bindings, { binary: process.env.QUOTADOCK_CODEXBAR_BIN || 'codexbar', timeoutMs: Math.min(12000, until - Date.now()) });
+  if (Date.now() >= until) return;
+  await call(`/v2/collector/refresh/${job.id}/complete`, { observations: observations(slots, snapshot) }, until);
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);
