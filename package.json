@@ -6,10 +6,16 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node bridge/cli.mjs serve",
-    "demo": "node bridge/cli.mjs serve --demo",
+    "start": "npm run build && node bridge/cli.mjs serve",
+    "demo": "npm run build && node bridge/cli.mjs serve --demo",
     "status": "node bridge/cli.mjs status",
-    "test": "node --test bridge/*.test.mjs web/*.test.cjs"
+    "test": "npm run build && node --test bridge/*.test.mjs && playwright test --config web/playwright.config.ts",
+    "typecheck": "tsc --noEmit -p web/tsconfig.json",
+    "build": "npm run typecheck && vite build --config web/vite.config.ts",
+    "preview": "vite preview --config web/vite.config.ts --host 127.0.0.1",
+    "test:web": "playwright test --config web/playwright.config.ts"
   },
+  "dependencies": { "react": "19.1.1", "react-dom": "19.1.1" },
+  "devDependencies": { "@types/react": "19.1.10", "@types/react-dom": "19.1.9", "typescript": "5.9.2", "vite": "7.3.7", "@playwright/test": "1.64.0" },
   "license": "MIT"
 }

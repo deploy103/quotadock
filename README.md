@@ -52,7 +52,7 @@ The zero-dependency bridge invokes fixed CodexBar commands, caches results for 6
 | Surface | Requirements | Preview status / limits |
 | --- | --- | --- |
 | Bridge | Node.js 22; installed CodexBar for live data | Local source CLI; demo needs no provider login |
-| Web dashboard | Modern browser on bridge host | Local paired dashboard; separate public website is a labelled static demo |
+| Web dashboard | Modern browser on bridge host | React / strict TypeScript paired dashboard; separate React public website is a labelled demo |
 | iPhone | iOS 17+, Mac with Xcode 16+ to build | Source only; real device requires trusted HTTPS |
 | iOS widgets | iOS 17+, installed native app | OS-scheduled updates; not live counters |
 | Apple Watch / widgets | watchOS 10+, paired iPhone | Cached sanitized snapshots; not direct provider login |
@@ -122,14 +122,16 @@ sessions/grants and cascades owned records; backups have separate expiry.
 
 ## 빠른 시작 · Korean quickstart
 
-Node.js 22를 설치하고 저장소 루트에서 실행하세요. 브리지 자체에는 npm 의존성이 없습니다.
+Node.js 22를 설치하고 저장소 루트에서 실행하세요. 수집기 자체는 Node 내장 API를 사용하고,
+웹 대시보드는 React·strict TypeScript·Vite로 빌드합니다.
 
 ```sh
 git clone --branch feat/quota-dock https://github.com/quotadock-dev/quotadock.git
 cd quotadock
+npm ci --ignore-scripts
 node bridge/cli.mjs init
 node bridge/cli.mjs status --demo
-node bridge/cli.mjs serve --demo
+npm run demo
 ```
 
 현재 소스는 [PR #2](https://github.com/quotadock-dev/quotadock/pull/2)의 `feat/quota-dock` 브랜치에 있습니다. `main` 병합 전에는 위 브랜치를 지정해야 합니다.
@@ -144,7 +146,7 @@ node bridge/cli.mjs serve --demo
 
 ```sh
 node bridge/cli.mjs status
-node bridge/cli.mjs serve
+npm start
 ```
 
 iPhone에서 `127.0.0.1`은 Mac이 아닌 iPhone 자신입니다. 실제 기기는 **사설 VPN과 HTTPS 리버스 프록시** 또는 아래 네이티브 TLS 구성을 사용하고 신뢰할 수 있는 인증서를 설정하세요. 인증 없이 공개 인터넷에 노출하면 안 됩니다.
@@ -196,9 +198,18 @@ regression also needs OpenSSL with `req -addext`; it generates temporary fake
 certificates and uses loopback only, without provider accounts or cloud access.
 
 ```sh
+npm ci --ignore-scripts
+npx playwright install --with-deps chromium
 npm test
 python3 .agents/skills/checking-codexbar-usage/scripts/test_codexbar.py
 ```
+
+`npm test` strictly typechecks and builds the React dashboard, runs the bridge
+contracts, then nine Chromium browser contracts against the built bridge. Those
+check safe pairing, cache preservation, disconnect races, deadlines, background
+pause and keyboard controls. `web-dist/` is generated, not committed; direct
+`node bridge/cli.mjs serve` requires `npm run build` first. Collector-only commands
+do not require a frontend build. Linux browser tests do not verify native iOS.
 
 See [contributing](CONTRIBUTING.md), [security reporting](SECURITY.md), [changelog](CHANGELOG.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Use the issue forms for reproducible bugs or focused proposals; never paste raw provider diagnostics or credentials. Repository-local skills provide read-only CodexBar inspection and safe QuotaDock verification; they are not installed globally.
 

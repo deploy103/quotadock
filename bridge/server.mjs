@@ -13,7 +13,9 @@ export async function createBridge({ host = '127.0.0.1', token, getSnapshot, tls
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid pairing token.');
   const secret = Buffer.from(`Bearer ${token}`);
   const buckets = new Map();
-  const staticFiles = new Map(await Promise.all(Object.entries(files).map(async ([url, [file, type]]) => [url, { body: await readFile(new URL(`../web/${file}`, import.meta.url)), type }])));
+  // Fixed build filenames only: never expose source modules or arbitrary filesystem paths.
+  // Loading is deferred until serving, so collector-only imports need no frontend build.
+  const staticFiles = new Map(await Promise.all(Object.entries(files).map(async ([url, [file, type]]) => [url, { body: await readFile(new URL(`../web-dist/${file}`, import.meta.url)), type }])));
   const handler = async (req, res) => {
     const headers = {
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
