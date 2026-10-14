@@ -64,7 +64,7 @@ jobs:
           sleep 2
           xcrun simctl io "$SIMULATOR_ID" screenshot native-dark.png
           xcrun simctl ui "$SIMULATOR_ID" appearance light
-          for STATE in unknown settings cloud batch widgets widgets-overview widgets-accessories watch watch-stale accessibility purchases purchases-unavailable purchases-pending purchases-error; do
+          for STATE in unknown settings cloud connection-error cloud-expired cloud-erasing batch widgets widgets-overview widgets-accessories watch watch-stale accessibility purchases purchases-unavailable purchases-pending purchases-error; do
             xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
             xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo "--${STATE}-preview"
             sleep 3
