@@ -75,8 +75,10 @@ It creates provider slots and approves a short-lived collector pairing code.
 The computer receives a **separate scoped 30-day grant**, never the phone's Apple
 session. See [collector setup](bridge/cloud.md) and [native setup](apple/README.md).
 Mobile login source now rotates one-hour access within a fixed 30-day family;
-credentials stay in phone-only Keychain. Renewal, restart recovery and family
-revocation still need validation before release; this is not a longer-lived bearer.
+credentials stay in phone-only Keychain. Simulator contracts and disposable-server
+renewal/revocation tests passed in [post-noon validation](apple/README.md#architecture-and-verification).
+Real Apple login, device restart/lock and deployed recovery remain release gates;
+this is not a longer-lived bearer or a physical-device login claim.
 
 The computer must remain online with its local provider sessions. It polls for
 phone jobs approximately every 20 seconds and checks due automatic collection

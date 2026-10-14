@@ -46,7 +46,9 @@ spent refresh token. Lock/background cancels transport, not that saved attempt.
 There is no background credential-renewal service or generic 401 mutation replay.
 Legacy two-field login replies remain readable but cannot renew. Family changes
 invalidate old work; ordinary rotation preserves observations and quota-job intents.
-These renewal contracts are authored source, pending simulator and real-device tests.
+Simulator and disposable-server renewal contracts passed in post-noon validation
+below. Real Apple authorization, device lock/restart and deployed recovery remain
+unverified; injected simulator transport is not genuine Apple authentication.
 
 `/v2/me` displays verified tier, limits, early-refresh and Live counters; `/v2/accounts` manages UUID slots (Free three, Plus ten, Pro uncapped registration, enforced server-side); `/v2/snapshot` preserves separate same-provider accounts and every window. Unconfigured pilot entitlements are Free only; purchase controls remain unavailable. Phone rows use account UUIDs, with an eight-character UUID label rather than an invented account name. Full sanitized account cache stays in the iPhone sandbox. **Watch/widgets intentionally receive only the first server-listed account per provider**, not all accounts; current server ordering is ascending account UUID. Do not treat these surfaces as account totals. Both caches preserve the original observation timestamp, not the fetch time. Server `lastError` is presented as fixed safe text; raw errors/names are not exported.
 
@@ -107,7 +109,7 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 
 ## Architecture and verification
 
-- `Shared/Snapshot.swift`: contract v1 Codable values, ISO8601 dates including fractions, explicit null re-encoding, 256 KiB bound, safe-message sanitization and demo samples.
+- `Shared/Snapshot.swift`: contract v1 Codable values, shared 64-byte ASCII ISO8601 quota dates truncated to server milliseconds, explicit null re-encoding, 256 KiB bound, safe-message sanitization and demo samples.
 - `Shared/Bridge.swift`: HTTPS pairing, Keychain and ephemeral URLSession client; rejects redirects/non-200/schema errors.
 - `Shared/SnapshotStore.swift`: atomic sanitized JSON App Group cache.
 - `Shared/WatchSync.swift`: latest application-context transfer, no secrets, Watch cache/timeline reload.
@@ -116,6 +118,25 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 - `iOS/Purchases.swift`: StoreKit product loading, UUID-bound purchase/restore, update recovery and server-accepted delivery. No client-side entitlement assignment.
 - `iOS/`, `Watch/`, `Widgets/`: small native surfaces and timeline adapters.
 - `Tests/ContractTests.swift`: public model decode/encode, nullable values, clamps, staleness, demo, schema/date/size rejection, URL restrictions, request authorization and response sanitization/status tests using URLProtocol (no real credentials or server).
+
+Post-noon [2026-10-14 CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
+passed **73 native tests**, iPhone/Watch/WidgetKit builds, **30 Node 22 tests**
+and **10 imported skill tests**. The single root-only service test was skipped
+under the CI runner's nonroot user; a separate disposable Node 22 root control
+passed it. Nineteen demo captures were generated; default, unknown, cloud consents,
+bridge rejection, expired session and pending erasure were inspected. The default
+is scrollable; its lower providers are offscreen, not all visible in one capture.
+This phase's new source remains undeployed and unsigned for physical devices.
+
+Validation reproduced a genuine iOS timestamp defect: a valid 64-byte timestamp
+lost `.123` entirely in `ISO8601DateFormatter`. The unchanged decoder failed;
+the shared bounded parser now truncates fractional digits to server milliseconds
+before parsing. UTC-offset equivalence, nonrounding `.000`/`.999` boundaries,
+cloud/shared cache round trips and invalid inputs passed. A real local HTTPS
+before/after probe also showed the old collector accepting untrusted TLS under
+`NODE_TLS_REJECT_UNAUTHORIZED=0`; the fixed collector rejects it before a bearer
+HTTP request, while an explicitly trusted test CA succeeds. Neither probe proves
+public TLS or provider account access.
 
 The [prior CI run](https://github.com/quotadock-dev/quotadock/actions/runs/38460764173) generated the project with XcodeGen, built iPhone/Watch/WidgetKit, and passed 29 native XCTests on an iPhone simulator, plus 18 bridge/web and 10 imported skill tests on Node 22. Twelve captures were inspected: default, dark, unknown, settings, separate cloud consents, distinct-slot batch selection, individual/overview/accessory widget hosts, empty/stale Watch hosts and large Dynamic Type. Visual inspection caught and resolved preview-routing and truncated widget-footer defects after an earlier passing test run. The large-text capture verifies visible long labels, 0% and 0.75%; its lower content remains offscreen. The [native demo](../docs/assets/native-demo.png) is from this run. Screenshots show scrollable app content and shared-component hosts, not system widgets or a physical Watch.
 
@@ -137,8 +158,10 @@ Regression cases cover same-provider slots, multiple windows/nulls, safe cache p
 Debug-only `--connection-error-preview`, `--cloud-expired-preview` and
 `--cloud-erasing-preview` render the actual dashboard/cloud form with failure
 or pending-erasure copy and explicitly demo readings. The pending sample shows
-disabled server/consent controls and reconnect; it does not execute erasure.
+muted consent controls and reconnect; its status never claims confirmed erasure.
+Server editing is disabled in source, but the screenshot cannot establish input
+interaction and its URL text is not visibly muted. The sample does not execute erasure.
 They install no fake session or entitlement and do not simulate a completed
-login. Their CI screenshots remain pending inspection in the current phase.
+login. Their post-noon CI screenshots were inspected as presentation evidence only.
 
 Real Apple sign-in, logout/erasure, collector completion, purchases and Watch delivery remain signed-device end-to-end gates with the user's Apple Team and trusted configured server. No provider account or Free Codex account was used in simulator tests.

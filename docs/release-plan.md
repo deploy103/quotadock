@@ -4,6 +4,15 @@ Source-preview plan, 2026-10-14. Implemented code is not a signed release or pro
 of Apple purchases, provider access, public HTTPS or physical-device behavior.
 Release gates remain open until their real-stack scenarios below pass.
 
+The 12:00 KST gate has passed. [Post-noon application CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
+passed 73 native tests and iPhone/Watch/WidgetKit builds, 30 Node 22 tests and
+10 imported skill tests; the root-only service test also passed separately.
+Private-backend CI passed 127 HTTP/cryptography/disposable PostgreSQL tests.
+Real local TLS and disposable Compose probes reproduced and fixed certificate
+validation, long-fraction timestamp and proxy address-allocation defects.
+Six affected/demo states were inspected. These results validate source contracts,
+not real Apple/provider/device flows or activation of the new server source.
+
 ## Account and data boundaries
 
 The phone owns its Apple-derived opaque access/refresh credentials in device-only
@@ -16,7 +25,7 @@ outside that contract revokes the family and its access credentials. There is
 no automatic replay of a rejected mutation. Legacy access-only sessions still
 require sign-in on expiry. Logout uses the refresh credential to revoke the
 captured family even if access expired; erasure cascades all families. These
-are source contracts pending validation, not a proof of persistent device login.
+are validated simulator/disposable-server contracts, not proof of persistent device login.
 The computer owns provider credentials and a separately revocable scoped
 collector grant. Watch/widgets receive sanitized quota and original timestamps,
 not either credential. The server owns tier enforcement and job accounting.
@@ -191,8 +200,8 @@ shared-database restore or invalidation requires separate operator approval.
 
 | Stage | Exit evidence | Current gate |
 |---|---|---|
-| Source integration | Real HTTP/Postgres policy tests, simulator native tests and inspected UI states | Prior CI evidence only; current source unverified, tests start 2026-10-14 12:00 KST |
-| Private pilot | New API healthy, unauthorized requests refused, resource caps preserved; no unrelated services changed | Dedicated VM; public DNS/TLS absent |
+| Source integration | Real HTTP/Postgres policy tests, simulator native tests and inspected UI states | Post-noon checks above passed; physical-device/provider/Apple behavior remains open |
+| Private pilot | New API healthy, unauthorized requests refused, resource caps preserved; no unrelated services changed | Dedicated VM runs the prior pilot; new source/schema not activated, public DNS/TLS absent |
 | Identity/device | Valid HTTPS; signed iPhone nonce login, rotation/restart/replay, family expiry, logout and erasure; no credentials in shared caches | Apple Team/provisioning and owner DNS |
 | Provider collection | Actual owned CLI slots; fresh/null/error/stale readings, offline collector and independent account mapping | Real accounts not exercised |
 | StoreKit sandbox | Buy/cancel/Ask to Buy/restore/reinstall, failed delivery retry, renewal/refund/revocation, newer update during delivery, account switch, ownership conflict and deleted-account recreation | App Store products, roots, sandbox configuration and recovery policy |
