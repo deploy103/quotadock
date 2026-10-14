@@ -32,7 +32,21 @@ iPhone fetches on foreground activation and manual/pull refresh. The bridge may 
 
 Choose **Optional cloud account** and separately affirm quota-storage/account-metadata and local collector-processing consent before starting real Apple authorization. Both toggles default off and reset when the server URL or session changes; a missing consent prevents challenge requests as well as Apple authorization. Default server is `https://usage.mvtp.cloud`; the editable URL is stored locally and must be trusted HTTPS, with no URL credentials/query/fragment. There is no fake identity, provider login or OpenAI login. DNS, TLS, Apple capability/configuration and server failures are reported without exposing diagnostics.
 
-The client POSTs `/v2/auth/challenge`, sets the AuthorizationServices request nonce to **exactly `challenge.nonce`**, requests no email/name scopes, and POSTs the returned identity JWT with the challenge ID and affirmative consent to `/v2/auth/apple`. Only the returned one-hour opaque session is persisted, in the iPhone-only device-only Keychain (`WhenUnlockedThisDeviceOnly`). No identity JWT or session is stored in quota caches, UserDefaults, Watch or widgets. Requests use ephemeral sessions, no cookies/cache, no redirects, streamed 256 KiB response bounds and 20-second resource timeouts.
+The client POSTs `/v2/auth/challenge`, requires exactly its three documented fields, a canonical UUID, a 43-byte base64url nonce and 300-second lifetime, and checks foreground authority again before presenting Apple authorization. It sets the AuthorizationServices request nonce to **exactly `challenge.nonce`**, requests no email/name scopes, and POSTs the returned identity JWT with the challenge ID and affirmative consent to `/v2/auth/apple`. The returned opaque access/refresh credentials, family UUID and absolute deadlines are persisted together in the iPhone-only device-only Keychain (`WhenUnlockedThisDeviceOnly`). Access lasts at most one hour; the login family has a fixed 30-day deadline that rotation never extends. No identity JWT or credential is stored in quota caches, UserDefaults, Watch or widgets. Requests use ephemeral sessions, no cookies/cache, no redirects, streamed 256 KiB response bounds and 20-second resource timeouts.
+
+Foreground operations renew through `/v2/auth/refresh` before reusing access with
+130 seconds or less remaining. Concurrent callers share one rotation. Before a
+send, the phone durably saves the original UUID, start time and send reservation;
+uncertain delivery retries the identical body/key, at most twice within 60 seconds
+including process restart. The response must retain the original family/deadline
+and change both credentials. Its absolute `expiresAt` prevents a recovered response
+from starting another hour. An exhausted or old unresolved attempt stays blocked
+until sign-out/reconnection; the phone never mints a replacement key with a possibly
+spent refresh token. Lock/background cancels transport, not that saved attempt.
+There is no background credential-renewal service or generic 401 mutation replay.
+Legacy two-field login replies remain readable but cannot renew. Family changes
+invalidate old work; ordinary rotation preserves observations and quota-job intents.
+These renewal contracts are authored source, pending simulator and real-device tests.
 
 `/v2/me` displays verified tier, limits, early-refresh and Live counters; `/v2/accounts` manages UUID slots (Free three, Plus ten, Pro uncapped registration, enforced server-side); `/v2/snapshot` preserves separate same-provider accounts and every window. Unconfigured pilot entitlements are Free only; purchase controls remain unavailable. Phone rows use account UUIDs, with an eight-character UUID label rather than an invented account name. Full sanitized account cache stays in the iPhone sandbox. **Watch/widgets intentionally receive only the first server-listed account per provider**, not all accounts; current server ordering is ascending account UUID. Do not treat these surfaces as account totals. Both caches preserve the original observation timestamp, not the fetch time. Server `lastError` is presented as fixed safe text; raw errors/names are not exported.
 
@@ -42,7 +56,11 @@ auto-renewable products and shows Apple's localized price. Apple signature and
 account checks precede transient signed-transaction submission to the server;
 only a valid accepted response permits `finish()`. Failed new deliveries remain
 unfinished; expired/refunded acceptance does not grant paid access. A server read,
-not the product ID, applies the tier. The app-lifetime update listener retains
+not the product ID, applies the tier. After receipt acceptance it fetches only
+`/v2/me`, preserving quota observations, caches, collectors and refresh selection.
+If another read is active, pending entitlement reads coalesce into one follow-up
+under the same session revision; logout or loss of foreground prevents delivery.
+The app-lifetime update listener retains
 newer signed changes to an in-flight transaction. New sessions recover unfinished
 transactions/current entitlements; only explicit Restore calls `AppStore.sync`.
 Context revisions reject stale completions on logout/server/session/account
@@ -53,17 +71,35 @@ and signed-device validation; see [release plan](../docs/release-plan.md).
 
 Foreground automatic refresh honors Settings and submits `mode:auto`; manual/pull refresh submits `mode:force` (an early batch may use Free allowance). Requests use a fresh UUID idempotency key per user operation. Select 1–50 owned slots in **Refresh batch**, initially the first 50. That in-memory selection survives account-list reads, removes deleted slots, and resets on owner/logout changes. Registration above 50 does not block smaller batches. Live restores its authoritative server slot set and 30-minute wall deadline; stop it before changing targets. Hidden/locked apps pause requests, not the deadline.
 
-Account and snapshot reads prefer tenant-scoped `/page` endpoints and traverse
-ascending UUID cursors. Only a first-page 404 falls back to legacy endpoints;
-malformed, duplicate, foreign, incomplete or changing lists retain the last
-usable reading. A full read is bounded to 60 seconds, 8 MiB and 100 pages per
-endpoint (5,000 slots), independent of the server's uncapped Pro registration.
+Modern reads traverse tenant-owned snapshot pages at 250 rows using ascending
+UUID cursors and derive slots from those same rows, avoiding a second account
+traversal. A full read is bounded to 60 seconds, 8 MiB and 20 pages (5,000 slots),
+independent of the server's uncapped Pro registration. Request starts are spaced
+at least 500 ms apart. Malformed, duplicate, nonadvancing or incomplete pages
+retain the last usable reading; pages are not a frozen snapshot across requests.
+Only a first-page 404 enables legacy fallback, which also validates the snapshot
+against an owned slot list. Deploy the 250-row API before this client; an old
+50-row-only endpoint rejects this query with 400, not a compatibility 404.
 If a full local snapshot exceeds 256 KiB, the offline cache explicitly retains
 only the first 50 accounts without changing original observation timestamps.
 
 A pending job means **waiting for the scoped local collector**, not updated quota. Pair/approve/revoke it using [collector setup](../bridge/cloud.md); provider credentials remain on the computer. Independent Claude/Codex/Grok accounts need explicit local durable-key mappings; Gemini remains one local account. The phone cannot obtain provider quotas directly without granted APIs, and does not collect/complete jobs. Pending requests poll their exact `/v2/jobs/:id`, every five seconds while foreground, with a 60-second polling deadline and bounded request timeout. Job ID, mode, targets and lease must remain consistent. Terminal replies are followed by one bounded account/snapshot read (separate 60-second limit); `completed` can mean failed collection, not fresh quota. Unknown/failure remains unknown and previous source observations remain visible. An old backend without status lookup fails waiting closed rather than guessing completion from observation timestamps.
 
-Logout POSTs `/v2/auth/logout`; account erasure DELETEs `/v2/me` after destructive confirmation. Local sessions/caches are cleared immediately and old in-flight completions cannot restore them. Failed revocation/erasure is explicitly **not confirmed**; reconnect to retry account erasure (server sessions expire within one hour). Slot deletion uses the real DELETE endpoint and clears local caches before re-reading. Switching cloud/bridge owners clears both caches and sends an empty Watch snapshot; offline Watch and OS-rendered widgets may retain previously rendered content until delivery/reload. Switching to the bridge attempts server logout and never treats its legacy token as a cloud session.
+Logout clears local authority first, then POSTs the captured refresh credential to
+`/v2/auth/revoke`, which revokes the entire login family even after access expiry.
+Legacy sessions use `/v2/auth/logout`. Account erasure renews access if necessary,
+then clears local sessions/caches before DELETE `/v2/me` after destructive
+confirmation. An intervening account/sign-in change cancels that old erasure;
+old in-flight completions cannot restore authority. Failed revocation/erasure is
+explicitly **not confirmed**; reconnect to retry erasure. An unrevoked family can
+remain valid until its original 30-day deadline. Slot deletion uses the real
+DELETE endpoint and clears local caches before re-reading. Switching cloud/bridge
+owners clears both caches and sends an empty Watch snapshot; offline Watch and
+OS-rendered widgets may retain previously rendered content until delivery/reload.
+Switching to the bridge attempts family revocation and never treats its legacy
+token as a cloud session. A parsed fresh login that cannot be saved or loses
+foreground authority is revoked best-effort; an entirely lost login response
+cannot be assumed revoked.
 
 Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is unknown, not exhausted. Plans are displayed as supplied by the sanitized contract; null is “Plan unknown.” Codex refers to the **Codex allowance under a ChatGPT plan**, not overall ChatGPT usage. Gemini window labels are preserved as model tiers. Unavailable/error providers remain visible, diagnostics are replaced with fixed safe text, and readings older than 15 minutes are stale. Reset dates are informational, not a quota promise.
 
@@ -97,5 +133,12 @@ or credentials. `--purchases-preview`, `--purchases-unavailable-preview`,
 This is not physical-device validation. On a Mac, inspect embedding/signing in Xcode and test Keychain sharing, first-unlock fallback, Home/Today/Lock Screen layout, Watch pairing/transfer, complications and stale/offline readings. Small accessory layouts are deliberately terse; large Dynamic Type, long tier/plan labels and system widget rendering require device visual review. Unit tests do not establish real TLS, Keychain provisioning or WatchConnectivity delivery.
 
 Regression cases cover same-provider slots, multiple windows/nulls, safe cache projections with fractional observation timestamps, duplicate/oversized/insecure input rejection, selected batches/ownership boundaries, fixed Live selections, missing consent and mode-switch cache/revision clearing. Debug-only `--unknown-preview`, `--settings-preview`, `--cloud-preview`, `--batch-preview`, `--widgets-preview`, `--widgets-overview-preview`, `--widgets-accessories-preview`, `--watch-preview`, `--watch-stale-preview` and `--accessibility-preview` enable deterministic UI captures. These isolated samples do not provide identity, session, entitlement or authentication bypass. Widget and Watch host galleries render the shared content inside iPhone-sized frames; they are not system WidgetKit layout or physical Watch evidence.
+
+Debug-only `--connection-error-preview`, `--cloud-expired-preview` and
+`--cloud-erasing-preview` render the actual dashboard/cloud form with failure
+or pending-erasure copy and explicitly demo readings. The pending sample shows
+disabled server/consent controls and reconnect; it does not execute erasure.
+They install no fake session or entitlement and do not simulate a completed
+login. Their CI screenshots remain pending inspection in the current phase.
 
 Real Apple sign-in, logout/erasure, collector completion, purchases and Watch delivery remain signed-device end-to-end gates with the user's Apple Team and trusted configured server. No provider account or Free Codex account was used in simulator tests.

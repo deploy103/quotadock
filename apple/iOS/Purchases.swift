@@ -62,6 +62,7 @@ final class PurchasesModel: ObservableObject {
     private var inFlight: [UInt64: Date] = [:]
     private var newerUpdates: [UInt64: VerificationResult<StoreKit.Transaction>] = [:]
     private var onVerified: (() async -> Void)?
+    private var onUnauthorized: (() -> Void)?
     private var listener: Task<Void, Never>?
     private var recovery: Task<Void, Never>?
 
@@ -77,6 +78,7 @@ final class PurchasesModel: ObservableObject {
     deinit { listener?.cancel(); recovery?.cancel() }
 
     func configure(client: CloudClient?, accountToken: UUID?, available: Bool,
+                   onUnauthorized: @escaping () -> Void = {},
                    onVerified: @escaping () async -> Void) {
         let next: PurchaseContextIdentity?
         if available, let client, let bearer = client.token, !bearer.isEmpty, let accountToken {
@@ -90,7 +92,7 @@ final class PurchasesModel: ObservableObject {
             status = next == nil ? "Purchases unavailable. Connect to a verified cloud account." : "Load subscription products to purchase."
         }
         identity = next; self.client = next == nil ? nil : client
-        self.available = next != nil; self.onVerified = onVerified
+        self.available = next != nil; self.onVerified = onVerified; self.onUnauthorized = onUnauthorized
         // A normal quota read must not replay every current entitlement again.
         // Reconnect (new session) and explicit Restore retry unconfirmed receipts.
         guard changed, next != nil, recovery == nil else { return }
@@ -230,6 +232,13 @@ final class PurchasesModel: ObservableObject {
             await onVerified?()
         } catch {
             if current(value) {
+                if case CloudHTTPError.unauthorized = error {
+                    let rejected = onUnauthorized
+                    configure(client: nil, accountToken: nil, available: false, onVerified: {})
+                    rejected?()
+                    status = "Sign in again before retrying transaction delivery. The Apple transaction remains unfinished."
+                    return
+                }
                 status = "Server verification could not be confirmed. No new paid status applied; reconnect or restore to retry delivery."
             }
         }

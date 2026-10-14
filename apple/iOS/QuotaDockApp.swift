@@ -29,6 +29,19 @@ final class DockModel: ObservableObject {
             snapshot = Snapshot(schemaVersion: 1, generatedAt: Date(), demo: true,
                                 providers: Snapshot.preview.providers.filter { $0.id == .grok })
         }
+        if ProcessInfo.processInfo.arguments.contains("--connection-error-preview") {
+            demo = true; snapshot = .preview
+            status = "Bridge pairing rejected. Pair again; original observations retained."
+        }
+        if ProcessInfo.processInfo.arguments.contains("--cloud-expired-preview") {
+            demo = true; snapshot = .preview
+            cloud.status = "DEMO · Sign in again — cloud session expired or rejected. Original observations retained."
+        }
+        if ProcessInfo.processInfo.arguments.contains("--cloud-erasing-preview") {
+            demo = true; snapshot = .preview
+            cloud.busy = true
+            cloud.status = "DEMO · Local account cleared. Waiting for server erasure confirmation."
+        }
         #endif
     }
 
@@ -47,8 +60,10 @@ final class DockModel: ObservableObject {
         if cloud.session != nil {
             let revision = cloud.revision
             await cloud.read()
+            if cloud.session == nil, !demo { status = cloud.status; return }
             guard revision == cloud.revision, !demo else { return }
             await cloud.refresh(force: !automatic)
+            if cloud.session == nil, !demo { status = cloud.status }
             return
         }
         busy = true
@@ -64,7 +79,11 @@ final class DockModel: ObservableObject {
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
             guard revision == pairingRevision, !demo else { return }
-            status = "Refresh unavailable. Showing cached data, if any. Check pairing and connection."
+            switch error as? BridgeTransportError {
+            case .unauthorized: status = "Bridge pairing rejected. Pair again; original observations retained."
+            case .forbidden: status = "Bridge access refused. Check the bridge's access policy; original observations retained."
+            default: status = "Refresh unavailable. Showing cached data, if any. Check pairing and connection."
+            }
         }
     }
 }
@@ -161,7 +180,9 @@ struct DockView: View {
                 .onAppear {
                     #if DEBUG
                     showSettings = ProcessInfo.processInfo.arguments.contains("--settings-preview")
-                    showCloudPreview = ProcessInfo.processInfo.arguments.contains("--cloud-preview")
+                    showCloudPreview = ProcessInfo.processInfo.arguments.contains("--cloud-preview") ||
+                        ProcessInfo.processInfo.arguments.contains("--cloud-expired-preview") ||
+                        ProcessInfo.processInfo.arguments.contains("--cloud-erasing-preview")
                     showBatchPreview = ProcessInfo.processInfo.arguments.contains("--batch-preview")
                     showSurfacePreview = surfacePreview != nil
                     #endif
@@ -218,9 +239,20 @@ struct PairingView: View {
                 Button("Save pairing") {
                     do {
                         try PairingStore.save(Pairing(baseURL: url.trimmingCharacters(in: .whitespacesAndNewlines), token: token))
-                        let old = model.cloud.client
+                        let old = model.cloud.session
                         model.cloud.clear()
-                        if let old { Task { _ = try? await old.request("v2/auth/logout", method: "POST", body: [:]) } }
+                        let cloudRevision = model.cloud.revision
+                        let pairingRevision = model.pairingRevision
+                        if let old {
+                            Task {
+                                do { try await CloudClient.revoke(old) }
+                                catch {
+                                    guard model.cloud.revision == cloudRevision,
+                                          model.pairingRevision == pairingRevision else { return }
+                                    model.status = "Pair bridge saved; previous cloud logout unconfirmed. Its login family may remain valid for up to 30 days."
+                                }
+                            }
+                        }
                         token = ""
                         dismiss()
                         Task { await model.refresh() }

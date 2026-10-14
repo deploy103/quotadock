@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import CryptoKit
 import AuthenticationServices
 import SwiftUI
 import UIKit
@@ -7,6 +8,23 @@ import UIKit
 struct CloudAccount: Decodable, Identifiable {
     let id: UUID
     let provider: ProviderID
+}
+
+struct CloudChallenge: Decodable {
+    let challengeId: String
+    let nonce: String
+    let expiresIn: Int
+    static func decode(_ data: Data) throws -> Self {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == Set(["challengeId", "nonce", "expiresIn"]) else { throw SnapshotError.invalid }
+        let result = try JSONDecoder().decode(Self.self, from: data)
+        guard result.expiresIn == 300, result.challengeId.utf8.count == 36,
+              UUID(uuidString: result.challengeId)?.uuidString.lowercased() == result.challengeId,
+              result.nonce.utf8.count == 43,
+              result.nonce.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) ||
+                  (48...57).contains($0) || $0 == 45 || $0 == 95 }) else { throw SnapshotError.invalid }
+        return result
+    }
 }
 
 struct CloudJob: Decodable {
@@ -18,6 +36,14 @@ struct CloudJob: Decodable {
     let accountIds: [UUID]
     let expiresAt: String
     let debited: Bool
+
+    static func lookup(_ data: Data, requested: [UUID], mode: Mode) throws -> Self? {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == Set(["job"]) else { throw SnapshotError.invalid }
+        if root["job"] is NSNull { return nil }
+        guard let job = root["job"] as? [String: Any] else { throw SnapshotError.invalid }
+        return try decode(JSONSerialization.data(withJSONObject: job), requested: requested, mode: mode)
+    }
 
     static func decode(_ data: Data, requested: [UUID], mode: Mode, previous: Self? = nil) throws -> Self {
         let job = try JSONDecoder().decode(Self.self, from: data)
@@ -253,6 +279,82 @@ struct CloudSession: Codable {
     let baseURL: URL
     let token: String
     let expiresAt: Date
+    var refreshToken: String? = nil
+    var familyId: UUID? = nil
+    var refreshExpiresAt: Date? = nil
+    var pendingRenewal: UUID? = nil
+    var pendingRenewalStartedAt: Date? = nil
+    var pendingRenewalSends: Int? = nil
+
+    func sameAuthority(as other: Self) -> Bool {
+        guard baseURL == other.baseURL, familyId == other.familyId,
+              refreshExpiresAt == other.refreshExpiresAt else { return false }
+        return familyId != nil || (token == other.token && expiresAt == other.expiresAt)
+    }
+
+    static func login(_ data: Data, baseURL: URL, previous: Self? = nil, now: Date = Date()) throws -> Self {
+        struct Response: Decodable {
+            let sessionToken: String; let expiresIn: Int
+            let expiresAt: String?
+            let refreshToken: String?; let familyId: String?; let refreshExpiresAt: String?
+        }
+        guard data.count <= 4096,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(root.keys) == Set(["sessionToken", "expiresIn"]) ||
+                Set(root.keys) == Set(["sessionToken", "expiresIn", "expiresAt", "refreshToken", "familyId", "refreshExpiresAt"]) else { throw SnapshotError.invalid }
+        let value = try JSONDecoder().decode(Response.self, from: data)
+        guard (1...3600).contains(value.expiresIn) else { throw SnapshotError.invalid }
+        var next = Self(baseURL: baseURL, token: value.sessionToken,
+                        expiresAt: now.addingTimeInterval(Double(value.expiresIn)))
+        if let raw = value.familyId, let timestamp = value.refreshExpiresAt,
+           let accessTimestamp = value.expiresAt, let refresh = value.refreshToken {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let fractional = formatter.date(from: timestamp)
+            let fractionalAccess = formatter.date(from: accessTimestamp)
+            formatter.formatOptions = [.withInternetDateTime]
+            guard raw.count == 36, let id = UUID(uuidString: raw), id.uuidString.lowercased() == raw,
+                  timestamp.utf8.count <= 32, timestamp.utf8.allSatisfy({ $0 < 128 }), timestamp.hasSuffix("Z"),
+                  accessTimestamp.utf8.count <= 32, accessTimestamp.utf8.allSatisfy({ $0 < 128 }), accessTimestamp.hasSuffix("Z"),
+                  let expiry = fractional ?? formatter.date(from: timestamp),
+                  let accessExpiry = fractionalAccess ?? formatter.date(from: accessTimestamp),
+                  expiry > now, expiry.timeIntervalSince(now) <= 30 * 86400 + 60,
+                  accessExpiry > now, accessExpiry.timeIntervalSince(now) <= Double(value.expiresIn) + 60,
+                  accessExpiry <= expiry else { throw SnapshotError.invalid }
+            // Identical retries retain the original server deadline. Receiving
+            // expiresIn again must not start another hour on the phone.
+            next = Self(baseURL: baseURL, token: value.sessionToken, expiresAt: accessExpiry)
+            next.refreshToken = refresh; next.familyId = id; next.refreshExpiresAt = expiry
+        } else if root.count != 2 { throw SnapshotError.invalid }
+        try next.validate()
+        if let previous {
+            guard next.sameAuthority(as: previous), next.token != previous.token,
+                  next.refreshToken != previous.refreshToken else { throw SnapshotError.invalid }
+        }
+        return next
+    }
+
+    func validate() throws {
+        _ = try Pairing(baseURL: baseURL.absoluteString, token: token)
+        guard baseURL.absoluteString.utf8.count <= 2048, token.utf8.count == 43,
+              token.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) ||
+                  (48...57).contains($0) || $0 == 45 || $0 == 95 }),
+              expiresAt.timeIntervalSince1970.isFinite else { throw SnapshotError.invalid }
+        if let refreshToken, let familyId, let refreshExpiresAt {
+            _ = familyId
+            guard refreshToken != token, refreshToken.utf8.count == 43,
+                  refreshToken.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }),
+                  refreshExpiresAt.timeIntervalSince1970.isFinite,
+                  expiresAt <= refreshExpiresAt.addingTimeInterval(1) else { throw SnapshotError.invalid }
+            guard (pendingRenewal == nil) == (pendingRenewalStartedAt == nil),
+                  (pendingRenewal == nil) == (pendingRenewalSends == nil),
+                  pendingRenewalStartedAt.map({ $0.timeIntervalSince1970.isFinite }) ?? true,
+                  pendingRenewalSends.map({ (0...2).contains($0) && pendingRenewal != nil }) ?? true else { throw SnapshotError.invalid }
+        } else {
+            guard refreshToken == nil, familyId == nil, refreshExpiresAt == nil, pendingRenewal == nil,
+                  pendingRenewalStartedAt == nil, pendingRenewalSends == nil else { throw SnapshotError.invalid }
+        }
+    }
 }
 
 enum CloudSessionStore {
@@ -270,16 +372,29 @@ enum CloudSessionStore {
         q[kSecReturnData as String] = true
         var result: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let session = try? JSONDecoder().decode(CloudSession.self, from: data) else { return nil }
+              let data = result as? Data, data.count <= 4096,
+              let session = try? JSONDecoder().decode(CloudSession.self, from: data),
+              (try? session.validate()) != nil else { return nil }
         return session
     }
     static func save(_ session: CloudSession) throws {
-        remove()
-        var q = query
-        q[kSecValueData as String] = try JSONEncoder().encode(session)
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw SnapshotError.unpaired }
+        try save(session, update: SecItemUpdate, add: SecItemAdd)
+    }
+    static func save(_ session: CloudSession,
+                     update: (CFDictionary, CFDictionary) -> OSStatus,
+                     add: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus) throws {
+        try session.validate()
+        let data = try JSONEncoder().encode(session)
+        guard data.count <= 4096 else { throw SnapshotError.invalid }
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        let status = update(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = query
+            attributes.forEach { item[$0.key] = $0.value }
+            guard add(item as CFDictionary, nil) == errSecSuccess else { throw SnapshotError.unpaired }
+        } else if status != errSecSuccess { throw SnapshotError.unpaired }
     }
     static func remove() { SecItemDelete(query as CFDictionary) }
 }
@@ -308,7 +423,7 @@ struct CloudClient {
         self.token = token
         self.scope = scope
     }
-    func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, timeout: TimeInterval = 20) async throws -> Data {
+    func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, timeout: TimeInterval = 20, encodedBody: Data? = nil) async throws -> Data {
         try Task.checkCancellation()
         guard timeout > 0 else { throw SnapshotError.invalid }
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
@@ -328,8 +443,8 @@ struct CloudClient {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        if let body {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if body != nil || encodedBody != nil {
+            request.httpBody = try encodedBody ?? body.map { try JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
             guard (request.httpBody?.count ?? 0) <= 32 * 1024 else { throw SnapshotError.invalid }
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -337,25 +452,230 @@ struct CloudClient {
         guard let response = response as? HTTPURLResponse else { throw SnapshotError.response }
         if response.statusCode == 404 { throw CloudHTTPError.notFound }
         if response.statusCode == 401 { throw CloudHTTPError.unauthorized }
-        guard (200..<300).contains(response.statusCode) else {
-            throw SnapshotError.response
-        }
         var data = Data()
+        let successful = (200..<300).contains(response.statusCode)
         for try await byte in bytes {
             try Task.checkCancellation()
             guard ProcessInfo.processInfo.systemUptime < deadline else { throw SnapshotError.invalid }
-            guard data.count < 256 * 1024 else { throw SnapshotError.invalid }
+            guard data.count < (successful ? 256 * 1024 : 4096) else {
+                if !successful { throw CloudHTTPError.classify(status: response.statusCode, data: Data(), retryAfter: response.value(forHTTPHeaderField: "Retry-After")) }
+                throw SnapshotError.invalid
+            }
             data.append(byte)
         }
+        if !successful { throw CloudHTTPError.classify(status: response.statusCode, data: data, retryAfter: response.value(forHTTPHeaderField: "Retry-After")) }
         return data
+    }
+
+    // No ownership callbacks or cancelled model scope: logout/switch callers
+    // clear local authority first, then revoke their captured installation.
+    static func revoke(_ session: CloudSession) async throws {
+        let client = try Self(baseURL: session.baseURL.absoluteString,
+                              token: session.refreshToken == nil ? session.token : nil)
+        _ = try await client.request(session.refreshToken == nil ? "v2/auth/logout" : "v2/auth/revoke",
+            method: "POST", body: session.refreshToken.map { ["refreshToken": $0] } ?? [:])
     }
 }
 
-enum CloudHTTPError: Error { case notFound, unauthorized }
+enum CloudHTTPError: Error, Equatable {
+    case notFound, unauthorized
+    case rejected(status: Int, code: String?)
+    case transient(status: Int, code: String?, retryAfter: TimeInterval)
+    static func classify(status: Int, data: Data, retryAfter: String?) -> Self {
+        if status == 401 { return .unauthorized }
+        if status == 404 { return .notFound }
+        let allowed: Set<String> = ["rate_limited", "early_budget_exhausted", "live_budget_exhausted",
+            "refresh_too_soon", "refresh_in_progress", "live_slot_conflict", "live_unavailable",
+            "background_collection_disabled", "collector_scope", "account_limit",
+            "auto_interval_unavailable", "invalid_request", "idempotency_conflict"]
+        let root = data.count <= 4096 ? (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] : nil
+        let candidate = root?["error"] as? String
+        let code = candidate.flatMap { $0.utf8.count <= 64 && allowed.contains($0) ? $0 : nil }
+        if status == 429, let code, code != "rate_limited" {
+            return .rejected(status: status, code: code)
+        }
+        if status == 429 || [500, 502, 503, 504].contains(status) {
+            var delay: TimeInterval = 1
+            if let retryAfter {
+                guard retryAfter.count <= 128 else { return .rejected(status: status, code: code) }
+                let numeric = retryAfter.allSatisfy(\.isNumber) && !retryAfter.isEmpty ? Double(retryAfter) : nil
+                let parser = DateFormatter()
+                parser.locale = Locale(identifier: "en_US_POSIX")
+                parser.timeZone = TimeZone(secondsFromGMT: 0)
+                parser.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+                let seconds = numeric ?? parser.date(from: retryAfter)?.timeIntervalSinceNow
+                // Never shorten a valid server wait to fit our retry budget.
+                guard let seconds, seconds.isFinite, seconds <= 60 else {
+                    return .rejected(status: status, code: code)
+                }
+                delay = max(1, seconds)
+            }
+            return .transient(status: status, code: code, retryAfter: delay)
+        }
+        return .rejected(status: status, code: code)
+    }
+    var definitiveRejection: Bool {
+        if case .rejected(let status, _) = self { return (400..<500).contains(status) }
+        return false
+    }
+    var userMessage: String {
+        let code: String?
+        switch self {
+        case .rejected(_, let value), .transient(_, let value, _): code = value
+        case .unauthorized: return "Sign in again. Original observations retained."
+        case .notFound: return "Requested resource unavailable. Original observations retained."
+        }
+        switch code {
+        case "early_budget_exhausted": return "Today's 10 Free early refreshes are used. Due collection remains available; the allowance resets at KST midnight."
+        case "live_budget_exhausted": return "Live allowance is used. Plus resets per verified subscription period; Pro resets at KST midnight."
+        case "refresh_too_soon": return "Wait at least one minute between collection jobs. Original observations retained."
+        case "refresh_in_progress": return "Another collector job is pending. Read the cached snapshot or try after it completes."
+        case "live_slot_conflict": return "Stop the previous Live session before changing its slots."
+        case "rate_limited": return "Server rate limit reached. Wait before trying again. Original observations retained."
+        case "account_limit": return "Your verified tier's provider-slot limit is reached."
+        default: return "Request refused or temporarily unavailable. Original observations retained."
+        }
+    }
+    static func retryDelay(_ error: Error) -> TimeInterval? {
+        if case let Self.transient(_, _, delay) = error { return delay }
+        if error is DecodingError { return 1 }
+        if case SnapshotError.invalid = error { return 1 }
+        if case SnapshotError.response = error { return 1 }
+        if let error = error as? URLError,
+           [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet].contains(error.code) { return 1 }
+        return nil
+    }
+}
+
+// Every continuation resolves the SAME request key first. Persist only the
+// exact command, not a bearer token, transport deadline or unverified job.
+struct CloudRefreshIntent {
+    let revision: Int
+    let ids: [UUID]
+    let mode: CloudJob.Mode
+    let idempotencyKey: UUID
+    let body: Data
+    var deadline: TimeInterval
+    var attempts = 0
+    var job: CloudJob?
+    init(revision: Int, ids: [UUID], mode: CloudJob.Mode, idempotencyKey: UUID = UUID()) throws {
+        guard !ids.isEmpty, ids.count <= 50, Set(ids).count == ids.count else { throw SnapshotError.invalid }
+        self.revision = revision; self.ids = ids; self.mode = mode
+        self.idempotencyKey = idempotencyKey
+        deadline = ProcessInfo.processInfo.systemUptime + 60
+        body = try JSONSerialization.data(withJSONObject: ["accountIds": ids.map(\.uuidString),
+            "mode": mode.rawValue, "idempotencyKey": idempotencyKey.uuidString], options: [.sortedKeys])
+    }
+    init(revision: Int, body: Data) throws {
+        guard !body.isEmpty, body.count <= 4096,
+              let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+              Set(root.keys) == Set(["accountIds", "mode", "idempotencyKey"]),
+              let rawIDs = root["accountIds"] as? [String], !rawIDs.isEmpty, rawIDs.count <= 50,
+              let rawMode = root["mode"] as? String, let mode = CloudJob.Mode(rawValue: rawMode),
+              let rawKey = root["idempotencyKey"] as? String, let key = UUID(uuidString: rawKey) else {
+            throw SnapshotError.invalid
+        }
+        let ids = rawIDs.compactMap(UUID.init(uuidString:))
+        guard ids.count == rawIDs.count, Set(ids).count == ids.count else { throw SnapshotError.invalid }
+        self.revision = revision; self.ids = ids; self.mode = mode
+        idempotencyKey = key; self.body = body
+        deadline = ProcessInfo.processInfo.systemUptime + 60
+    }
+    mutating func continueOperation() throws {
+        try Task.checkCancellation()
+        attempts = 0
+        deadline = ProcessInfo.processInfo.systemUptime + 60
+    }
+    mutating func beginAttempt() throws -> TimeInterval {
+        try Task.checkCancellation()
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard attempts < 2, remaining > 0 else { throw SnapshotError.response }
+        attempts += 1
+        return min(20, remaining)
+    }
+}
+
+enum CloudRefreshIntentStore {
+    private struct Record: Codable {
+        let version: Int
+        let sessionFingerprint: Data
+        let body: Data
+    }
+    // Same private phone-only Keychain group as the cloud session. It is never
+    // copied to an App Group, a widget, Watch or a provider collector.
+    static var query: [String: Any] {
+        var result = CloudSessionStore.query
+        result[kSecAttrAccount as String] = "refresh-intent"
+        return result
+    }
+    private static func fingerprint(_ session: CloudSession) throws -> Data {
+        try session.validate()
+        if let family = session.familyId, let expiry = session.refreshExpiresAt {
+            guard expiry > Date() else { throw CloudHTTPError.unauthorized }
+            let binding = session.baseURL.absoluteString + "\n" + family.uuidString.lowercased() + "\n" + String(expiry.timeIntervalSince1970)
+            return Data(SHA256.hash(data: Data(binding.utf8)))
+        }
+        guard session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
+        let binding = session.baseURL.absoluteString + "\n" + session.token + "\n" +
+            String(session.expiresAt.timeIntervalSince1970)
+        return Data(SHA256.hash(data: Data(binding.utf8)))
+    }
+    static func encode(_ intent: CloudRefreshIntent, session: CloudSession) throws -> Data {
+        guard intent.mode != .live else { throw SnapshotError.invalid }
+        _ = try CloudRefreshIntent(revision: intent.revision, body: intent.body)
+        let data = try JSONEncoder().encode(Record(version: 1,
+            sessionFingerprint: fingerprint(session), body: intent.body))
+        guard data.count <= 8192 else { throw SnapshotError.invalid }
+        return data
+    }
+    static func decode(_ data: Data, session: CloudSession, revision: Int) throws -> CloudRefreshIntent? {
+        guard data.count <= 8192 else { throw SnapshotError.invalid }
+        let record = try JSONDecoder().decode(Record.self, from: data)
+        guard record.version == 1 else { throw SnapshotError.invalid }
+        guard record.sessionFingerprint == (try fingerprint(session)) else { return nil }
+        let intent = try CloudRefreshIntent(revision: revision, body: record.body)
+        guard intent.mode != .live else { throw SnapshotError.invalid }
+        return intent
+    }
+    static func load(session: CloudSession, revision: Int) throws -> CloudRefreshIntent? {
+        try load(session: session, revision: revision, copyMatching: SecItemCopyMatching)
+    }
+    static func load(session: CloudSession, revision: Int,
+                     copyMatching: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus) throws -> CloudRefreshIntent? {
+        var q = query
+        q[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = copyMatching(q as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else { throw SnapshotError.unpaired }
+        let intent = try decode(data, session: session, revision: revision)
+        if intent == nil { remove() }
+        return intent
+    }
+    static func save(_ intent: CloudRefreshIntent, session: CloudSession) throws {
+        try save(intent, session: session, update: SecItemUpdate, add: SecItemAdd)
+    }
+    static func save(_ intent: CloudRefreshIntent, session: CloudSession,
+                     update: (CFDictionary, CFDictionary) -> OSStatus,
+                     add: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus) throws {
+        // Restarting Live remains explicit opt-in through the server session.
+        if intent.mode == .live { remove(); return }
+        let attributes: [String: Any] = [kSecValueData as String: try encode(intent, session: session),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        let status = update(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = query
+            attributes.forEach { item[$0.key] = $0.value }
+            guard add(item as CFDictionary, nil) == errSecSuccess else { throw SnapshotError.unpaired }
+        } else if status != errSecSuccess { throw SnapshotError.unpaired }
+    }
+    static func remove() { SecItemDelete(query as CFDictionary) }
+}
 
 final class CloudReadBudget {
     let deadline: TimeInterval
     private var bytes = 0
+    private var lastStart: TimeInterval?
     init(seconds: TimeInterval = CloudPagination.operationSeconds) {
         deadline = ProcessInfo.processInfo.systemUptime + seconds
     }
@@ -364,10 +684,21 @@ final class CloudReadBudget {
         guard bytes <= CloudPagination.maximumBytes,
               ProcessInfo.processInfo.systemUptime < deadline else { throw SnapshotError.invalid }
     }
-    func fetch(_ path: String, client: CloudClient) async throws -> Data {
-        try Task.checkCancellation()
+    func fetch(_ path: String, client: CloudClient,
+               beforeRequest: () throws -> Void = {}) async throws -> Data {
+        try validate()
+        if let lastStart {
+            let wait = lastStart + 0.5 - ProcessInfo.processInfo.systemUptime
+            if wait > 0 {
+                guard ProcessInfo.processInfo.systemUptime + wait < deadline else { throw SnapshotError.invalid }
+                try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+        }
+        try validate()
+        try beforeRequest()
         let remaining = deadline - ProcessInfo.processInfo.systemUptime
         guard remaining > 0, bytes < CloudPagination.maximumBytes else { throw SnapshotError.invalid }
+        lastStart = ProcessInfo.processInfo.systemUptime
         let data = try await client.request(path, timeout: min(20, remaining))
         bytes += data.count
         try validate()
@@ -376,12 +707,12 @@ final class CloudReadBudget {
 }
 
 // One read (including metadata and legacy fallback): 60 seconds monotonic,
-// 8 MiB aggregate, 100 pages per endpoint (at most 5,000 slots).
+// 8 MiB aggregate, 20 pages per endpoint (at most 5,000 slots).
 // The transport separately caps each response at 256 KiB and refuses redirects.
 struct CloudPagination {
     static let operationSeconds: TimeInterval = 60
     static let maximumBytes = 8 * 1024 * 1024
-    static let maximumPages = 100
+    static let maximumPages = 20
     struct Page<Row: Decodable>: Decodable {
         let accounts: [Row]
         let nextCursor: UUID?
@@ -401,7 +732,7 @@ struct CloudPagination {
         var cursor: UUID?
         for _ in 0..<maximumPages {
             try Task.checkCancellation()
-            let query = "?limit=50" + (cursor.map { "&after=\($0.uuidString.lowercased())" } ?? "")
+            let query = "?limit=250" + (cursor.map { "&after=\($0.uuidString.lowercased())" } ?? "")
             let page: Page<Row>
             do { page = try decode(try await fetch(path + query)) }
             catch CloudHTTPError.notFound {
@@ -409,7 +740,7 @@ struct CloudPagination {
                 guard cursor == nil else { throw SnapshotError.invalid }
                 throw CloudHTTPError.notFound
             }
-            guard page.accounts.count <= 50 else { throw SnapshotError.invalid }
+            guard page.accounts.count <= 250 else { throw SnapshotError.invalid }
             var previous = cursor?.uuidString.lowercased()
             for row in page.accounts {
                 let key = id(row).uuidString.lowercased()
@@ -433,12 +764,13 @@ struct CloudPagination {
         } catch CloudHTTPError.notFound {
             struct Legacy: Decodable { let accounts: [CloudAccount] }
             let rows = try JSONDecoder().decode(Legacy.self, from: try await fetch("v2/accounts")).accounts
-            guard Set(rows.map(\.id)).count == rows.count else { throw SnapshotError.invalid }
+            guard rows.count <= 5000, Set(rows.map(\.id)).count == rows.count else { throw SnapshotError.invalid }
             return rows
         }
     }
-    static func snapshot(slots: [CloudAccount], fetch: (String) async throws -> Data) async throws -> CloudSnapshot {
+    static func snapshot(slots: [CloudAccount]? = nil, fetch: (String) async throws -> Data) async throws -> CloudSnapshot {
         var generatedAt: Date?
+        var ownedSlots = slots
         let rows: [CloudSnapshot.Account]
         do {
             rows = try await collect(path: "v2/snapshot/page", id: { $0.id }, fetch: fetch) { data in
@@ -457,15 +789,20 @@ struct CloudPagination {
                 return Page(accounts: snapshot.accounts, nextCursor: try JSONDecoder().decode(Cursor.self, from: data).nextCursor)
             }
         } catch CloudHTTPError.notFound {
+            if ownedSlots == nil { ownedSlots = try await accounts(fetch: fetch) }
             let legacy = try CloudSnapshot.decode(try await fetch("v2/snapshot"))
             guard !legacy.demo, legacy.cachedSubset != true else { throw SnapshotError.invalid }
             generatedAt = legacy.generatedAt
             rows = legacy.accounts
         }
-        guard Set(slots.map(\.id)).count == slots.count else { throw SnapshotError.invalid }
-        let owned = Dictionary(uniqueKeysWithValues: slots.map { ($0.id, $0.provider) })
-        guard rows.count == slots.count, Set(rows.map(\.id)).count == rows.count,
-              rows.allSatisfy({ owned[$0.id] == $0.provider }), let generatedAt else { throw SnapshotError.invalid }
+        guard rows.count <= 5000, Set(rows.map(\.id)).count == rows.count,
+              let generatedAt else { throw SnapshotError.invalid }
+        if let slots = ownedSlots {
+            guard slots.count <= 5000, Set(slots.map(\.id)).count == slots.count else { throw SnapshotError.invalid }
+            let owned = Dictionary(uniqueKeysWithValues: slots.map { ($0.id, $0.provider) })
+            guard rows.count == slots.count,
+                  rows.allSatisfy({ owned[$0.id] == $0.provider }) else { throw SnapshotError.invalid }
+        }
         return CloudSnapshot(schemaVersion: 2, generatedAt: generatedAt, demo: false, accounts: rows)
     }
 }
@@ -473,10 +810,21 @@ struct CloudPagination {
 @MainActor
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     let purchases = PurchasesModel()
-    @Published var session = CloudSessionStore.load()
+    @Published var session = CloudSessionStore.load() {
+        didSet {
+            if let oldValue, let session, session.sameAuthority(as: oldValue) { return }
+            renewalTask?.task.cancel()
+            renewalTask = nil
+            revision += 1; refreshIntent = nil; loadedIntent = false; pendingEntitlementRead = false
+            reading = false; readingRevision = nil; requests.cancel()
+        }
+    }
     @Published var snapshot = CloudSessionStore.load() == nil ? nil : CloudCache.load()
     @Published var slots: [CloudAccount] = [] {
-        didSet { refreshSelection.reconcile(slots: slots) }
+        didSet {
+            refreshSelection.reconcile(slots: slots)
+            if let intent = refreshIntent, !CloudBatchSelection.valid(intent.ids, slots: slots) { refreshIntent = nil }
+        }
     }
     @Published private(set) var refreshSelection = CloudBatchSelection()
     var selectionLocked: Bool { liveEnabled || me?.liveSession != nil || !liveSlotIDs.isEmpty }
@@ -484,6 +832,8 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         guard !busy, !selectionLocked else { return }
         if !refreshSelection.select(ids, slots: slots) {
             status = "Select distinct owned slots, at most 50 per batch."
+        } else if refreshIntent?.ids != ids {
+            refreshIntent = nil
         }
     }
     @Published var status = "Cloud is optional. A local collector is required; this phone cannot collect provider quotas."
@@ -498,10 +848,17 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     private var liveSlotIDs: [UUID] = []
     private var lastLiveRequest: Date?
     private var reading = false
+    private var readingRevision: Int?
+    private var pendingEntitlementRead = false
+    private var loadedIntent = false
+    private var refreshIntent: CloudRefreshIntent? {
+        didSet { if refreshIntent == nil, loadedIntent { CloudRefreshIntentStore.remove() } }
+    }
     private let requests = CloudRequestScope()
+    private var renewalTask: (id: UUID, task: Task<CloudClient, Error>)?
     var foreground = true {
         didSet {
-            if !foreground { pollingTask?.cancel(); liveTask?.cancel(); requests.cancel() }
+            if !foreground { renewalTask?.task.cancel(); pollingTask?.cancel(); liveTask?.cancel(); requests.cancel() }
             else if liveEnabled { scheduleLive() }
         }
     }
@@ -511,7 +868,108 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     private var challenge: (id: String, base: String, revision: Int)?
     private var controller: ASAuthorizationController?
     private var pollingTask: Task<Void, Never>?
-    var client: CloudClient? { session.flatMap { try? CloudClient(baseURL: $0.baseURL.absoluteString, token: $0.token, scope: requests) } }
+    var client: CloudClient? {
+        guard let session else { return nil }
+        guard session.expiresAt > Date() else {
+            if session.familyId == nil { requireSignIn() }
+            return nil
+        }
+        return try? CloudClient(baseURL: session.baseURL.absoluteString, token: session.token, scope: requests)
+    }
+    func authorizedClient(fetchRenewal: ((Data) async throws -> Data)? = nil,
+                          save: @escaping (CloudSession) throws -> Void = CloudSessionStore.save) async throws -> CloudClient {
+        guard foreground, !Task.isCancelled, let original = session else { throw CancellationError() }
+        if let renewalTask {
+            let current = revision
+            let result = try await renewalTask.task.value
+            try Task.checkCancellation()
+            guard foreground, revision == current, session?.token == result.token else { throw CancellationError() }
+            return result
+        }
+        // Leave a 60-second read budget plus the accepted 60-second clock
+        // allowance and a small margin before reusing an existing bearer.
+        if original.pendingRenewal == nil, original.expiresAt.timeIntervalSinceNow > 130 {
+            return try CloudClient(baseURL: original.baseURL.absoluteString, token: original.token, scope: requests)
+        }
+        guard let refresh = original.refreshToken, let expiry = original.refreshExpiresAt, expiry > Date() else {
+            if original.expiresAt <= Date() { requireSignIn(); throw CloudHTTPError.unauthorized }
+            return try CloudClient(baseURL: original.baseURL.absoluteString, token: original.token, scope: requests)
+        }
+        let current = revision
+        let task = Task { @MainActor () async throws -> CloudClient in
+            try Task.checkCancellation()
+            guard self.foreground, self.revision == current else { throw CancellationError() }
+            var pending = original
+            if pending.pendingRenewal == nil {
+                pending.pendingRenewal = UUID()
+                pending.pendingRenewalStartedAt = Date()
+                pending.pendingRenewalSends = 0
+                try save(pending)
+                self.session = pending
+            }
+            guard let started = pending.pendingRenewalStartedAt else { throw SnapshotError.invalid }
+            let elapsed = Date().timeIntervalSince(started)
+            guard elapsed >= 0, elapsed < 60 else { throw SnapshotError.invalid }
+            // Old purchase delivery uses the old bearer. Disable it until a
+            // validated /me read reconfigures delivery for the new credential.
+            self.purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
+            let body = try JSONSerialization.data(withJSONObject: ["refreshToken": refresh,
+                "idempotencyKey": pending.pendingRenewal!.uuidString.lowercased()], options: [.sortedKeys])
+            let transport = try CloudClient(baseURL: original.baseURL.absoluteString, scope: self.requests)
+            let deadline = ProcessInfo.processInfo.systemUptime + (60 - elapsed)
+            for attempt in 0..<2 {
+                try Task.checkCancellation()
+                guard self.foreground, self.revision == current, self.session?.token == original.token else { throw CancellationError() }
+                do {
+                    let remaining = deadline - ProcessInfo.processInfo.systemUptime
+                    guard remaining > 0, (pending.pendingRenewalSends ?? 0) < 2 else { throw SnapshotError.invalid }
+                    // Reserve each send durably, including a cancelled/unknown
+                    // send. Restart must not reset the two-send limit.
+                    pending.pendingRenewalSends = (pending.pendingRenewalSends ?? 0) + 1
+                    try save(pending)
+                    self.session = pending
+                    let data: Data
+                    if let fetchRenewal { data = try await fetchRenewal(body) }
+                    else { data = try await transport.request("v2/auth/refresh", method: "POST", timeout: min(20, remaining), encodedBody: body) }
+                    let next = try CloudSession.login(data, baseURL: original.baseURL, previous: original)
+                    try Task.checkCancellation()
+                    guard ProcessInfo.processInfo.systemUptime < deadline, self.foreground,
+                          self.revision == current, self.session?.token == original.token else { throw CancellationError() }
+                    try save(next)
+                    self.session = next
+                    return try CloudClient(baseURL: next.baseURL.absoluteString, token: next.token, scope: self.requests)
+                } catch {
+                    guard attempt == 0, let delay = CloudHTTPError.retryDelay(error),
+                          ProcessInfo.processInfo.systemUptime + delay < deadline else { throw error }
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+            throw SnapshotError.invalid
+        }
+        let renewalID = UUID()
+        renewalTask = (renewalID, task)
+        defer { if renewalTask?.id == renewalID { renewalTask = nil } }
+        let result = try await task.value
+        try Task.checkCancellation()
+        guard foreground, revision == current, session?.token == result.token else { throw CancellationError() }
+        return result
+    }
+    private func requireSignIn() {
+        revision += 1
+        CloudRefreshIntentStore.remove()
+        requests.cancel()
+        purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
+        pollingTask?.cancel(); liveTask?.cancel(); liveEnabled = false
+        refreshIntent = nil; busy = false; reading = false; readingRevision = nil; me = nil; session = nil
+        liveDeadline = nil; liveStartedAt = nil; liveSlotIDs = []; lastLiveRequest = nil
+        collectors = []
+        CloudSessionStore.remove()
+        status = "Sign in again — cloud session expired or rejected. Original observations retained."
+    }
+    private func handleUnauthorized(_ error: Error) -> Bool {
+        guard case CloudHTTPError.unauthorized = error else { return false }
+        requireSignIn(); return true
+    }
 
     override init() {
         super.init()
@@ -530,9 +988,11 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         do {
             let client = try CloudClient(baseURL: base, scope: requests)
             let data = try await client.request("v2/auth/challenge", method: "POST", body: [:])
-            struct Challenge: Decodable { let challengeId: String; let nonce: String }
-            let response = try JSONDecoder().decode(Challenge.self, from: data)
-            guard current == revision else { return }
+            let response = try CloudChallenge.decode(data)
+            guard current == revision, foreground, !Task.isCancelled else {
+                if current == revision { busy = false }
+                return
+            }
             challenge = (response.challengeId, base, current)
             let request = ASAuthorizationAppleIDProvider().createRequest()
             request.requestedScopes = []
@@ -562,116 +1022,213 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         guard self.controller === controller else { return }
         guard let challenge, let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
               let data = credential.identityToken, let jwt = String(data: data, encoding: .utf8) else {
+            self.challenge = nil; self.controller = nil
             busy = false; status = "Apple did not return an identity token."; return
         }
         self.challenge = nil; self.controller = nil
         Task {
             defer { if revision == challenge.revision { busy = false } }
             do {
+                guard revision == challenge.revision, foreground, !Task.isCancelled else { return }
                 let client = try CloudClient(baseURL: challenge.base, scope: requests)
                 let data = try await client.request("v2/auth/apple", method: "POST", body: [
                     "challengeId": challenge.id, "identityToken": jwt,
                     "consent": ["quotaStorage": true, "collectorProcessing": true]])
-                struct Login: Decodable { let sessionToken: String; let expiresIn: Int }
-                let login = try JSONDecoder().decode(Login.self, from: data)
-                guard login.sessionToken.count == 43,
-                      login.sessionToken.unicodeScalars.allSatisfy({
-                          CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-").contains($0)
-                      }), (1...3600).contains(login.expiresIn) else { throw SnapshotError.invalid }
+                let next = try CloudSession.login(data, baseURL: client.baseURL)
                 guard revision == challenge.revision else {
-                    let stale = try CloudClient(baseURL: challenge.base, token: login.sessionToken)
-                    _ = try? await stale.request("v2/auth/logout", method: "POST", body: [:])
+                    try? await CloudClient.revoke(next)
                     return
                 }
-                let next = CloudSession(baseURL: client.baseURL, token: login.sessionToken,
-                                        expiresAt: Date().addingTimeInterval(Double(min(login.expiresIn, 3600))))
+                guard foreground, !Task.isCancelled else {
+                    try? await CloudClient.revoke(next)
+                    throw CancellationError()
+                }
+                // Clear every old-owner cache before replacing credentials.
+                // A crash between these writes must not load old quota under
+                // the newly signed-in account after restart.
+                CloudCache.clear()
                 onSwitch?()
-                try CloudSessionStore.save(next)
+                do { try CloudSessionStore.save(next) }
+                catch {
+                    try? await CloudClient.revoke(next)
+                    throw error
+                }
                 purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
                 liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil
-                liveSlotIDs = []; lastLiveRequest = nil; me = nil; slots = []
+                liveSlotIDs = []; lastLiveRequest = nil; me = nil; slots = []; snapshot = nil; budget = ""
                 refreshSelection = CloudBatchSelection()
-                PairingStore.remove(); session = next
+                PairingStore.remove(); session = next; busy = false
                 await read(internalWork: true)
             } catch { if revision == challenge.revision { status = "Server sign-in failed. No cloud session saved." } }
         }
     }
     func clear() {
         pollingTask?.cancel()
+        CloudRefreshIntentStore.remove()
+        refreshIntent = nil
         requests.cancel()
         purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
         liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil; me = nil; collectors = []
         liveSlotIDs = []; lastLiveRequest = nil
-        busy = false
+        busy = false; reading = false; readingRevision = nil
         revision += 1; challenge = nil; controller = nil; session = nil; snapshot = nil; slots = []; budget = ""
         refreshSelection = CloudBatchSelection()
         CloudSessionStore.remove(); CloudCache.clear(); onSwitch?()
     }
     func disconnect(delete: Bool) async {
-        let old = client
+        let captured = session
+        let owner = revision
+        let old: CloudClient?
+        if delete { old = try? await authorizedClient() }
+        else { old = nil }
+        // Do not clear a different account selected while renewal was suspended.
+        // A settings mutation may advance the read revision without switching
+        // authority. A cleared session/new Apple challenge is never equivalent.
+        guard revision == owner || captured.map({ session?.sameAuthority(as: $0) == true }) == true else { return }
         clear() // Revoke local authority immediately, including in-flight completions.
         let current = revision
+        if delete {
+            busy = true
+            status = "Local account cleared. Waiting for server erasure confirmation."
+        }
+        defer { if delete, revision == current { busy = false } }
         do {
-            _ = try await old?.request(delete ? "v2/me" : "v2/auth/logout", method: delete ? "DELETE" : "POST", body: [:])
+            if delete {
+                guard let old else { throw CloudHTTPError.unauthorized }
+                let detached = try CloudClient(baseURL: old.baseURL.absoluteString, token: old.token)
+                _ = try await detached.request("v2/me", method: "DELETE", body: [:])
+            } else {
+                guard let captured else { throw CloudHTTPError.unauthorized }
+                try await CloudClient.revoke(captured)
+            }
             guard revision == current else { return }
             status = delete ? "Cloud account erased." : "Signed out."
-        } catch { if revision == current { status = "Local session cleared; server erasure/revocation could not be confirmed. Reconnect to retry erasure. Session expires within one hour." } }
+        } catch { if revision == current { status = "Local session cleared; server erasure/revocation could not be confirmed. Reconnect to retry erasure. A login family may remain valid for up to 30 days." } }
     }
-    func read(internalWork: Bool = false) async {
-        guard let client, !reading, (!busy || internalWork), foreground, !Task.isCancelled else { return }
-        reading = true
-        defer { reading = false }
+    func read(internalWork: Bool = false, entitlementsOnly: Bool = false,
+              fetchData: ((String) async throws -> Data)? = nil,
+              intentCopyMatching: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemCopyMatching) async {
+        guard session != nil, (!busy || internalWork), foreground, !Task.isCancelled else { return }
+        if reading, readingRevision == revision {
+            if entitlementsOnly { pendingEntitlementRead = true }
+            return
+        }
         let current = revision
+        reading = true
+        readingRevision = current
+        defer {
+            if readingRevision == current {
+                reading = false
+                readingRevision = nil
+                if current == revision, pendingEntitlementRead {
+                    pendingEntitlementRead = false
+                    Task { [weak self] in
+                        guard let self, self.revision == current else { return }
+                        await self.read(internalWork: true, entitlementsOnly: true, fetchData: fetchData)
+                    }
+                }
+            }
+        }
         do {
+            let client = try await authorizedClient()
             let operation = CloudReadBudget()
             func fetch(_ path: String) async throws -> Data {
-                guard current == revision, foreground, session != nil else { throw CancellationError() }
-                let data = try await operation.fetch(path, client: client)
-                guard current == revision, foreground, session != nil else { throw CancellationError() }
+                guard current == revision, foreground else { throw CancellationError() }
+                guard let session, session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
+                let data: Data
+                if let fetchData { data = try await fetchData(path) }
+                else {
+                    data = try await operation.fetch(path, client: client) {
+                        guard current == revision, foreground else { throw CancellationError() }
+                        guard session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
+                    }
+                }
+                guard current == revision, foreground else { throw CancellationError() }
+                guard session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
                 return data
             }
             let verified = try CloudMe.decode(try await fetch("v2/me"))
-            let nextSlots = try await CloudPagination.accounts(fetch: fetch)
-            let next = try await CloudPagination.snapshot(slots: nextSlots, fetch: fetch)
+            let next: CloudSnapshot?
+            if entitlementsOnly { next = nil }
+            else { next = try await CloudPagination.snapshot(fetch: fetch) }
             struct Collectors: Decodable { let collectors: [CloudCollector] }
-            let paired = try? JSONDecoder().decode(Collectors.self, from: try await fetch("v2/collectors"))
-            try operation.validate()
-            guard current == revision, session != nil, foreground, !Task.isCancelled else { return }
-            slots = nextSlots; snapshot = next
-            if liveEnabled, !CloudBatchSelection.valid(liveSlotIDs, slots: nextSlots) {
-                liveEnabled = false; liveTask?.cancel()
+            let paired: Collectors?
+            if entitlementsOnly { paired = nil }
+            else {
+                do { paired = try JSONDecoder().decode(Collectors.self, from: try await fetch("v2/collectors")) }
+                catch CloudHTTPError.unauthorized { throw CloudHTTPError.unauthorized }
+                catch { try Task.checkCancellation(); paired = nil }
             }
-            self.me = verified; collectors = paired?.collectors ?? []
+            try operation.validate()
+            guard current == revision, let activeSession = session, foreground, !Task.isCancelled else { return }
+            if let next {
+                let nextSlots = next.accounts.map { CloudAccount(id: $0.id, provider: $0.provider) }
+                slots = nextSlots; snapshot = next
+                if !loadedIntent {
+                    do {
+                        let stored = try CloudRefreshIntentStore.load(session: activeSession, revision: current,
+                            copyMatching: intentCopyMatching)
+                        if let stored {
+                            guard CloudBatchSelection.valid(stored.ids, slots: nextSlots) else { throw SnapshotError.invalid }
+                            refreshIntent = stored
+                            _ = refreshSelection.select(stored.ids, slots: nextSlots)
+                        }
+                        loadedIntent = true
+                    } catch {
+                        if handleUnauthorized(error) { return }
+                        // Keep the unresolved record and retry recovery on the next
+                        // read. Verified observations remain independently useful.
+                    }
+                }
+                if liveEnabled, !CloudBatchSelection.valid(liveSlotIDs, slots: nextSlots) {
+                    liveEnabled = false; liveTask?.cancel()
+                }
+                collectors = paired?.collectors ?? []
+            }
+            self.me = verified
             purchases.configure(client: client, accountToken: verified.appAccountToken,
-                available: verified.purchasesAvailable && (session?.expiresAt ?? .distantPast) > Date()) { [weak self] in
+                available: verified.purchasesAvailable && activeSession.expiresAt > Date(),
+                onUnauthorized: { [weak self] in
+                    guard let self, self.revision == current, self.session?.token == client.token else { return }
+                    self.requireSignIn()
+                }) { [weak self] in
                 guard let self, self.revision == current else { return }
-                await self.read(internalWork: true)
+                await self.read(internalWork: true, entitlementsOnly: true)
             }
             reconcileLive(verified: verified)
-            CloudCache.save(next)
             budget = verified.budget
             if !verified.limits.live { liveEnabled = false; liveTask?.cancel() }
-            onSnapshot?(next.smallSurfaceSnapshot)
-            status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
+            if let next {
+                CloudCache.save(next)
+                onSnapshot?(next.smallSurfaceSnapshot)
+                status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
+                if !loadedIntent {
+                    status = "Cached server observations. Refresh blocked until saved request recovery succeeds; retry reading or explicitly clear/sign out."
+                }
+            }
         } catch {
             if current == revision {
-                if case CloudHTTPError.unauthorized = error {
-                    purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
-                }
-                status = "Cloud read unavailable or session expired. Original observations retained; sign in again if needed."
+                if handleUnauthorized(error) { return }
+                status = session?.pendingRenewal == nil
+                    ? "Cloud read unavailable or session expired. Original observations retained; sign in again if needed."
+                    : "Login renewal unconfirmed. Log out and reconnect with Apple if reading cannot recover it. Original observations retained."
             }
         }
     }
     func mutate(path: String, method: String, body: [String: Any] = [:]) async {
-        guard let client, !busy, !reading, !liveEnabled else { return }
+        guard !busy, !reading, !liveEnabled, foreground, !Task.isCancelled else { return }
         busy = true
         var current = revision
         defer { if current == revision { busy = false } }
         do {
+            let client = try await authorizedClient()
+            guard current == revision, foreground, (session?.expiresAt ?? .distantPast) > Date() else { throw CancellationError() }
             _ = try await client.request(path, method: method, body: body)
             guard current == revision else { return }
             if path == "v2/live/stop" { liveDeadline = nil; liveStartedAt = nil; liveSlotIDs = []; lastLiveRequest = nil }
             revision += 1
+            refreshIntent = nil
+            pendingEntitlementRead = false
             current = revision
             if method == "DELETE", path.hasPrefix("v2/accounts/") {
                 snapshot = nil
@@ -679,11 +1236,18 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                 onSwitch?()
             }
             await read(internalWork: true)
-        } catch { if current == revision { status = "Request refused or unavailable. Server slot, spacing and Free budget limits apply." } }
+        } catch { if current == revision {
+            if handleUnauthorized(error) { return }
+            status = (error as? CloudHTTPError)?.userMessage ?? "Request unavailable. Original observations retained."
+        } }
     }
     func refresh(force: Bool, live: Bool = false) async {
         guard !busy, !reading, foreground, !Task.isCancelled, !liveEnabled || live else { return }
-        guard let client, !slots.isEmpty else { await read(); return }
+        guard !slots.isEmpty else { await read(); return }
+        guard loadedIntent else {
+            status = "Refresh blocked until saved request recovery succeeds; retry reading or explicitly clear/sign out."
+            return
+        }
         let ids = live ? liveSlotIDs : refreshSelection.ids
         guard CloudBatchSelection.valid(ids, slots: slots) else {
             status = "Select 1–50 distinct owned slots per refresh."; return
@@ -692,27 +1256,80 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         let current = revision
         defer { if current == revision { busy = false } }
         do {
+            let client = try await authorizedClient()
+            guard current == revision, foreground else { throw CancellationError() }
             if live { lastLiveRequest = Date() }
-            let mode: CloudJob.Mode = live ? .live : force ? .force : .auto
-            let data = try await client.request("v2/refresh", method: "POST", body: [
-                "accountIds": ids.map(\.uuidString), "mode": mode.rawValue,
-                "idempotencyKey": UUID().uuidString])
-            let job = try CloudJob.decode(data, requested: ids, mode: mode)
+            var mode: CloudJob.Mode = live ? .live : force ? .force : .auto
+            // Foreground auto-refresh must not replace an unconfirmed forced
+            // command with a new key after a restart (or a manual retry).
+            if !live, let intent = refreshIntent, intent.revision == current,
+               intent.ids == ids, intent.mode != .live { mode = intent.mode }
+            let resuming = refreshIntent?.revision == current && refreshIntent?.ids == ids && refreshIntent?.mode == mode
+            if refreshIntent?.revision != current || refreshIntent?.ids != ids || refreshIntent?.mode != mode {
+                refreshIntent = try CloudRefreshIntent(revision: current, ids: ids, mode: mode)
+            } else {
+                try refreshIntent?.continueOperation()
+            }
+            guard let activeSession = session, let intent = refreshIntent else { throw CloudHTTPError.unauthorized }
+            // A durable command precedes the first send. Keychain failure must
+            // not silently degrade to a possibly duplicated in-memory send.
+            try CloudRefreshIntentStore.save(intent, session: activeSession)
+            if resuming, refreshIntent?.job == nil, let intent = refreshIntent {
+                guard activeSession.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
+                let data = try await client.request("v2/jobs/request/\(intent.idempotencyKey.uuidString)",
+                    timeout: min(20, activeSession.expiresAt.timeIntervalSinceNow))
+                guard current == revision, foreground, !Task.isCancelled else { return }
+                refreshIntent?.job = try CloudJob.lookup(data, requested: ids, mode: mode)
+            }
+            while refreshIntent?.job == nil {
+                guard current == revision, foreground,
+                      liveDeadline.map({ !live || Date() < $0 }) ?? true else { throw CancellationError() }
+                guard let session, session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
+                guard let timeout = try refreshIntent?.beginAttempt(), let body = refreshIntent?.body else {
+                    status = "Refresh cancelled because its selected slots changed. Original observations retained."
+                    return
+                }
+                do {
+                    let data = try await client.request("v2/refresh", method: "POST", timeout: min(timeout, session.expiresAt.timeIntervalSinceNow), encodedBody: body)
+                    guard current == revision, foreground, !Task.isCancelled else { return }
+                    refreshIntent?.job = try CloudJob.decode(data, requested: ids, mode: mode)
+                } catch {
+                    if let failure = error as? CloudHTTPError, failure.definitiveRejection {
+                        refreshIntent = nil
+                        throw failure
+                    }
+                    guard current == revision, foreground, !Task.isCancelled,
+                          let delay = CloudHTTPError.retryDelay(error), let intent = refreshIntent,
+                          intent.attempts < 2, ProcessInfo.processInfo.systemUptime + delay < intent.deadline,
+                          Date().addingTimeInterval(delay) < session.expiresAt else { throw error }
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+            guard let job = refreshIntent?.job else { return }
             guard current == revision, foreground, !Task.isCancelled else { return }
             if job.status == .pending {
                 status = "Waiting for local collector — quota has not been updated."
-                let task = Task { await poll(client: client, current: current, job: job, requested: ids) }
+                let remaining = max(0, (refreshIntent?.deadline ?? 0) - ProcessInfo.processInfo.systemUptime)
+                let task = Task { await poll(client: client, current: current, job: job, requested: ids, seconds: remaining) }
                 pollingTask = task
-                await task.value
+                await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
                 if current == revision { pollingTask = nil }
             } else {
+                refreshIntent = nil
                 await read(internalWork: true)
                 guard current == revision, foreground else { return }
                 status = job.status == .cached ? "No selected slots were due. Showing original observations." :
                     job.status == .expired ? "Collector job expired. Original observations retained." :
                     "Collector processing completed; this does not guarantee fresh quota. Check observation time and collection warnings."
             }
-        } catch { if current == revision { status = "Refresh unavailable. Old observations retained; verified tier limits or collector availability may apply." } }
+        } catch { if current == revision {
+            if handleUnauthorized(error) { return }
+            if let failure = error as? CloudHTTPError {
+                status = failure.userMessage
+            } else {
+                status = "Refresh outcome unconfirmed. Original observations retained; retry resolves the same request before any resend. No new key is issued for this unchanged batch."
+            }
+        } }
     }
 
     func startLive() {
@@ -747,8 +1364,15 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         liveTask = Task {
             while !Task.isCancelled, foreground, liveEnabled, current == revision {
                 if let liveDeadline, Date() >= liveDeadline { liveEnabled = false; return }
-                await read()
+                // Terminal jobs refresh quota pages; preflight only needs the
+                // current tier and authoritative Live session/deadline.
+                if !busy, !reading { await read(entitlementsOnly: true) }
                 guard liveEnabled, foreground, current == revision, !Task.isCancelled else { return }
+                if busy || reading {
+                    do { try await Task.sleep(nanoseconds: 1_000_000_000) }
+                    catch { return }
+                    continue
+                }
                 if let lastLiveRequest {
                     let wait = 60 - Date().timeIntervalSince(lastLiveRequest)
                     if wait > 0 {
@@ -790,27 +1414,31 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         liveDeadline = active.deadlineDate
     }
 
-    private func poll(client: CloudClient, current: Int, job: CloudJob, requested: [UUID]) async {
+    private func poll(client: CloudClient, current: Int, job: CloudJob, requested: [UUID], seconds: TimeInterval) async {
         // Cancellation on leaving foreground cancels sleeps and URLSession async requests.
-        let operation = CloudReadBudget()
+        let operation = CloudReadBudget(seconds: min(60, seconds))
         let deadline = operation.deadline
         do {
             for _ in 0..<12 {
                 let wait = min(5, deadline - ProcessInfo.processInfo.systemUptime)
                 guard wait > 0 else { break }
                 try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-                guard foreground, current == revision, session != nil else { return }
+                guard foreground, current == revision, let session else { return }
+                guard session.expiresAt > Date() else { requireSignIn(); return }
                 let remaining = deadline - ProcessInfo.processInfo.systemUptime
                 guard remaining > 0 else { break }
                 func fetch(_ path: String) async throws -> Data {
-                    guard foreground, current == revision, session != nil else { throw CancellationError() }
+                    guard foreground, current == revision else { throw CancellationError() }
+                    guard session.expiresAt > Date() else { throw CloudHTTPError.unauthorized }
                     return try await operation.fetch(path, client: client)
                 }
                 let result = try CloudJob.decode(try await fetch("v2/jobs/\(job.id.uuidString)"),
                     requested: requested, mode: job.mode, previous: job)
                 try Task.checkCancellation()
-                guard foreground, current == revision, session != nil else { return }
+                guard foreground, current == revision else { return }
+                guard session.expiresAt > Date() else { requireSignIn(); return }
                 if result.status != .pending {
+                    refreshIntent = nil
                     await read(internalWork: true)
                     guard current == revision, foreground, !Task.isCancelled else { return }
                     status = result.status == .expired ? "Collector job expired. Original observations retained." :
@@ -822,6 +1450,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             status = "Collector wait timed out. Cached observations retained; retry later."
         } catch {
             if current == revision {
+                if handleUnauthorized(error) { return }
                 status = "Collector wait stopped or unavailable. Original observations retained."
             }
         }
@@ -908,10 +1537,10 @@ struct CloudView: View {
         Form {
             Text(model.status).font(.caption)
             if model.session == nil {
-                TextField("Trusted HTTPS server", text: $base).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Trusted HTTPS server", text: $base).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.busy)
                 Text("Only connect to a server you trust. The server stores sanitized quota, a pseudonymous Apple account, sessions and refresh counters — not provider credentials. A local collector processes quota for your slots. You can instead use Pair bridge without cloud.")
-                Toggle("Store sanitized quota and account metadata", isOn: $quotaStorageConsent)
-                Toggle("Allow local collector quota processing", isOn: $collectorProcessingConsent)
+                Toggle("Store sanitized quota and account metadata", isOn: $quotaStorageConsent).disabled(model.busy)
+                Toggle("Allow local collector quota processing", isOn: $collectorProcessingConsent).disabled(model.busy)
                 Text("Both consents are required for cloud. Purchases require configured Apple products and server verification.").font(.caption).foregroundStyle(.secondary)
                 Button("Connect with Apple") {
                     let trustedBase = base

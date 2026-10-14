@@ -9,6 +9,32 @@ final class ContractTests: XCTestCase {
     ]}
     """.utf8)
 
+    func testAppleChallengeRejectsMalformedWireBeforeAuthorization() throws {
+        let id = "a1111111-1111-4111-8111-111111111111"
+        let nonce = "Az09-_" + String(repeating: "b", count: 37)
+        let wire: [String: Any] = ["challengeId": id, "nonce": nonce, "expiresIn": 300]
+        let challenge = try CloudChallenge.decode(JSONSerialization.data(withJSONObject: wire))
+        XCTAssertEqual(challenge.challengeId, id)
+        XCTAssertEqual(challenge.nonce, nonce)
+        XCTAssertEqual(challenge.expiresIn, 300)
+        for (field, value) in [("challengeId", "not-a-uuid" as Any),
+                               ("challengeId", id.uppercased() as Any),
+                               ("nonce", String(nonce.dropLast()) as Any),
+                               ("nonce", "$" + String(nonce.dropFirst()) as Any),
+                               ("expiresIn", 0 as Any), ("expiresIn", 301 as Any),
+                               ("expiresIn", true as Any), ("identityToken", "unexpected" as Any)] {
+            var invalid = wire
+            invalid[field] = value
+            XCTAssertThrowsError(try CloudChallenge.decode(JSONSerialization.data(withJSONObject: invalid)))
+        }
+        for field in wire.keys {
+            var invalid = wire
+            invalid.removeValue(forKey: field)
+            XCTAssertThrowsError(try CloudChallenge.decode(JSONSerialization.data(withJSONObject: invalid)))
+        }
+        XCTAssertThrowsError(try CloudChallenge.decode(Data("[]".utf8)))
+    }
+
     func testCloudPreservesSameProviderSlotsAndUnknownWindows() throws {
         let snapshot = try CloudSnapshot.decode(cloudFixture)
         XCTAssertEqual(snapshot.accounts.count, 2)
@@ -21,6 +47,26 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers.count, 1)
         XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers[0].windows[0].clampedRemaining, 75)
         XCTAssertEqual(snapshot.smallSurfaceSnapshot.providers[0].observedAt, snapshot.accounts[0].observedAt)
+    }
+
+    func testCloudDatesAcceptServerBoundaryAndOffsetWithoutChangingInstant() throws {
+        let timestamp = "2026-10-13T10:00:00.123" + String(repeating: "0", count: 40) + "Z"
+        XCTAssertEqual(timestamp.utf8.count, 64)
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(with: cloudFixture) as? [String: Any])
+        var accounts = try XCTUnwrap(root["accounts"] as? [[String: Any]])
+        accounts[0]["observedAt"] = timestamp
+        var windows = try XCTUnwrap(accounts[0]["windows"] as? [[String: Any]])
+        windows[0]["resetsAt"] = "2026-10-13T19:00:00.123+09:00"
+        accounts[0]["windows"] = windows
+        root["accounts"] = accounts
+        let snapshot = try CloudSnapshot.decode(JSONSerialization.data(withJSONObject: root))
+        let observation = try XCTUnwrap(snapshot.accounts[0].observedAt)
+        let reset = try XCTUnwrap(snapshot.accounts[0].windows[0].resetsAt)
+        XCTAssertEqual(observation.timeIntervalSince1970, 1791885600.123, accuracy: 0.001)
+        XCTAssertEqual(reset.timeIntervalSince1970, 1791885600.123, accuracy: 0.001)
+        let cached = try CloudSnapshot.decode(snapshot.cacheData())
+        XCTAssertEqual(cached.accounts[0].observedAt, observation)
+        XCTAssertEqual(cached.accounts[0].windows[0].resetsAt, reset)
     }
 
     func testCloudCacheExportsOnlySanitizedQuotaAndOriginalTime() throws {
@@ -335,11 +381,11 @@ final class ContractTests: XCTestCase {
         do {
             _ = try await client.fetch(Pairing(baseURL: "https://example.com/reject", token: "test-token"))
             XCTFail("Must reject non-200 responses")
-        } catch SnapshotError.response { } catch { XCTFail("Unexpected error type") }
+        } catch BridgeTransportError.unauthorized { } catch { XCTFail("Unexpected error type") }
         do {
             _ = try await client.fetch(Pairing(baseURL: "https://example.com/oversized", token: "test-token"))
             XCTFail("Must stop oversized response streams")
-        } catch SnapshotError.invalid { } catch { XCTFail("Unexpected error type") }
+        } catch BridgeTransportError.transport { } catch { XCTFail("Unexpected error type") }
     }
 }
 

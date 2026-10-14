@@ -74,6 +74,9 @@ The iPhone uses nonce-bound **Sign in with Apple**, without email/name scopes.
 It creates provider slots and approves a short-lived collector pairing code.
 The computer receives a **separate scoped 30-day grant**, never the phone's Apple
 session. See [collector setup](bridge/cloud.md) and [native setup](apple/README.md).
+Mobile login source now rotates one-hour access within a fixed 30-day family;
+credentials stay in phone-only Keychain. Renewal, restart recovery and family
+revocation still need validation before release; this is not a longer-lived bearer.
 
 The computer must remain online with its local provider sessions. It polls for
 phone jobs approximately every 20 seconds and checks due automatic collection
@@ -185,6 +188,10 @@ Watch receives snapshots through WatchConnectivity, **never the bridge token**. 
 - Live quota queries may contact providers through CodexBar. Demo is the offline-safe starting point.
 
 ## Development and community
+
+Offline tests need Node 22+, Python 3.10+ and a POSIX host. The collector TLS
+regression also needs OpenSSL with `req -addext`; it generates temporary fake
+certificates and uses loopback only, without provider accounts or cloud access.
 
 ```sh
 npm test
