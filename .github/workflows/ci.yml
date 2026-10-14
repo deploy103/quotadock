@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   bridge:
-    name: Node 22 bridge and imported skill tests
+    name: Node 22 bridge, React browser and imported skill tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: python3 .agents/skills/checking-codexbar-usage/scripts/test_codexbar.py
   apple:
