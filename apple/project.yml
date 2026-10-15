@@ -23,6 +23,8 @@ targetTemplates:
       - Shared/ProviderIcon.swift
       - Shared/WidgetContent.swift
       - Shared/WatchContent.swift
+      - Shared/Localization.swift
+      - Resources
       - Assets.xcassets
     settings:
       base:
@@ -128,10 +130,20 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: QuotaDock
+  QuotaDockUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_PREFIX).uitests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: QuotaDock
 schemes:
   QuotaDock:
     build:
       targets:
         QuotaDock: all
     test:
-      targets: [QuotaDockTests]
+      targets: [QuotaDockTests, QuotaDockUITests]

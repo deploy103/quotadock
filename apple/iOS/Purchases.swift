@@ -253,6 +253,7 @@ struct SubscriptionOption: Identifiable {
 
 // Prices come from StoreKit. This panel only displays offers; it never grants a tier.
 struct SubscriptionPanel: View {
+    @Environment(\.locale) private var locale
     let available: Bool
     let busy: Bool
     let status: String
@@ -261,33 +262,34 @@ struct SubscriptionPanel: View {
     let purchase: (String) -> Void
     let restore: () -> Void
     var body: some View {
-        Section("QuotaDock 구독") {
-            Text(status).font(.callout).accessibilityLabel("구독 상태: \(status)")
+        let _ = locale
+        Section(DockL10n.text("QuotaDock subscriptions")) {
+            Text(DockL10n.text(status)).font(.callout).accessibilityLabel(DockL10n.format("Subscription status: %@", DockL10n.text(status)))
             if available {
                 ForEach(options) { option in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(option.name).font(.headline)
-                        Text(option.id == PurchasePolicy.productIDs[0] ?
-                            "계정 10개 · 1시간 간격 · Live 구독 기간당 5회" :
-                            "계정 등록 무제한 · 20–120분 간격 · Live 하루 5회")
+                        Text(DockL10n.text(option.id == PurchasePolicy.productIDs[0] ?
+                            "10 accounts · hourly · 5 Live sessions per subscription period" :
+                            "Unlimited account registration · 20–120 minutes · 5 Live sessions per KST day"))
                             .font(.caption).foregroundStyle(.secondary)
-                        Button("\(option.price) / 월 · \(option.name) 구독") { purchase(option.id) }
+                        Button(DockL10n.format("%@ / month · Subscribe to %@", option.price, option.name)) { purchase(option.id) }
                             .disabled(busy)
                     }.padding(.vertical, 4)
                 }
-                if options.isEmpty { Text("Apple에서 상품을 불러온 뒤 가격을 확인하세요.").font(.caption) }
+                if options.isEmpty { Text(DockL10n.text("Load products from Apple to see prices.")).font(.caption) }
             } else {
-                Text("Apple 로그인, 서버 검증 설정, App Store 상품 준비가 필요합니다. 현재 구매할 수 없습니다.")
+                Text(DockL10n.text("Apple sign-in, server verification configuration and App Store products are required. Purchases are currently unavailable."))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Button("상품 다시 불러오기", action: load).disabled(!available || busy)
-            Button("구매 복원", action: restore).disabled(!available || busy)
-            if busy { ProgressView("처리 중 · 서버 확인 전에는 권한을 적용하지 않습니다.") }
-            Text("구독을 구매하면 매월 자동 갱신되며 Apple 계정에 요금이 청구됩니다. 다음 갱신 전까지 Apple 구독 설정에서 취소할 수 있습니다. AI 제공업체의 추가 사용량을 판매하는 것이 아닙니다. 클라우드 계정 삭제는 Apple 구독을 취소하지 않습니다.")
+            Button(DockL10n.text("Reload products"), action: load).disabled(!available || busy)
+            Button(DockL10n.text("Restore purchases"), action: restore).disabled(!available || busy)
+            if busy { ProgressView(DockL10n.text("Processing · no entitlement applied before server confirmation.")) }
+            Text(DockL10n.text("Subscriptions renew monthly and are charged to your Apple account. Cancel in Apple subscription settings before the next renewal. This does not sell additional AI provider usage. Deleting your cloud account does not cancel your Apple subscription."))
                 .font(.caption).foregroundStyle(.secondary)
-            Link("Apple 구독 관리", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
-            Link("개인정보·데이터 안내", destination: URL(string: "https://usage.mvtp.cloud/#privacy")!)
-            Link("표준 이용약관 (Apple EULA)", destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
+            Link(DockL10n.text("Manage Apple subscriptions"), destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+            Link(DockL10n.text("Privacy and data"), destination: URL(string: "https://usage.mvtp.cloud/#privacy")!)
+            Link(DockL10n.text("Standard terms (Apple EULA)"), destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
         }
     }
 }
@@ -308,19 +310,21 @@ struct SubscriptionsView: View {
 #if DEBUG
 // Presentation-only samples: no StoreKit product, login, receipt or entitlement.
 struct SubscriptionsPreview: View {
+    @Environment(\.locale) private var locale
     let state: String
     var body: some View {
+        let _ = locale
         NavigationStack {
             Form {
-                Text("DEMO · UI sample only. No purchase is possible.").font(.caption)
+                Text(DockL10n.text("DEMO · UI sample only. No purchase is possible.")).font(.caption)
                 SubscriptionPanel(available: state != "purchases-unavailable", busy: state == "purchases-pending",
-                    status: state == "purchases-pending" ? "구매 검증 중입니다. 서버 확인 전까지 유료 권한을 적용하지 않습니다." :
-                        state == "purchases-error" ? "서버 검증을 확인하지 못했습니다. 구매 복원으로 다시 시도하세요. 마지막 사용량은 유지됩니다." :
-                        state == "purchases-unavailable" ? "현재 구매할 수 없습니다." : "상품·가격은 화면 예시입니다. 실제 결제 기능은 연결되어 있지 않습니다.",
-                    options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: "₩3,990 예시"),
-                              SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: "가격 미정")],
+                    status: state == "purchases-pending" ? "Verifying purchase. No paid entitlement applied before server confirmation." :
+                        state == "purchases-error" ? "Server verification unconfirmed. Restore to retry. Last readings retained." :
+                        state == "purchases-unavailable" ? "Purchases currently unavailable." : "Sample products and prices only. No payment is connected.",
+                    options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: DockL10n.text("₩3,990 sample")),
+                              SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: DockL10n.text("Price undecided"))],
                     load: {}, purchase: { _ in }, restore: {})
-            }.navigationTitle("구독")
+            }.navigationTitle(DockL10n.text("Subscriptions"))
         }
     }
 }

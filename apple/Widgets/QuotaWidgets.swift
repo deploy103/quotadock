@@ -55,8 +55,8 @@ struct ProviderWidget: Widget {
         StaticConfiguration(kind: "QuotaDock.\(providerID.rawValue)", provider: QuotaTimeline()) { entry in
             QuotaWidgetView(entry: entry, providerID: providerID)
         }
-        .configurationDisplayName("\(providerID.displayName) remaining")
-        .description("Cached first account per provider. Open QuotaDock for all accounts and windows.")
+        .configurationDisplayName(DockL10n.format("%@ remaining", providerID.displayName))
+        .description(DockL10n.text("Cached first account per provider. Open QuotaDock for all accounts and windows."))
         #if os(iOS)
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryCircular, .accessoryInline])
         #else
@@ -81,8 +81,8 @@ struct OverviewWidget: Widget {
         StaticConfiguration(kind: "QuotaDock.overview", provider: QuotaTimeline()) { entry in
             OverviewWidgetView(entry: entry)
         }
-        .configurationDisplayName("All AI allowances")
-        .description("First quota window per provider. Codex is not total ChatGPT usage. Open the app for all windows and reset times.")
+        .configurationDisplayName(DockL10n.text("All AI allowances"))
+        .description(DockL10n.text("First quota window per provider. Codex is not total ChatGPT usage. Open the app for all windows and reset times."))
         .supportedFamilies([.systemMedium, .systemLarge])
     }
 }

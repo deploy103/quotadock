@@ -26,8 +26,17 @@ a {
   text-decoration: none;
 }
 button,
-input {
+input,
+select {
   font: inherit;
+}
+select {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid #9ba89d;
+  border-radius: 4px;
+  padding: 8px;
+  max-width: 100%;
 }
 button {
   background: var(--accent);
@@ -72,6 +81,8 @@ input:not([type="checkbox"]) {
 .masthead {
   min-height: 88px;
   display: flex;
+  flex-wrap: wrap;
+  padding: 16px 0;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -225,6 +236,7 @@ p {
 }
 .window-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
   align-items: baseline;

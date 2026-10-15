@@ -121,7 +121,11 @@ struct CloudMe: Decodable {
         return value
     }
     var budget: String {
-        "\(tier.rawValue.capitalized) · \(limits.accounts.map(String.init) ?? "unlimited") slots · auto \(autoMinutes)m · early \(limits.earlyBatchesPerDay.map { "\(earlyBatchesUsed)/\($0) KST day" } ?? "unlimited") · Live \(liveSessionsUsed)/\(liveSessionsLimit) \(tier == .plus ? "subscription period" : "KST day")"
+        DockL10n.format("%@ · %@ slots · auto %d min · early %@ · Live %d/%d %@",
+            tier == .free ? DockL10n.text("Free") : tier.rawValue.capitalized,
+            limits.accounts.map(String.init) ?? DockL10n.text("unlimited"), autoMinutes,
+            limits.earlyBatchesPerDay.map { DockL10n.format("%d/%d per KST day", earlyBatchesUsed, $0) } ?? DockL10n.text("unlimited"),
+            liveSessionsUsed, liveSessionsLimit, DockL10n.text(tier == .plus ? "subscription period" : "KST day"))
     }
 }
 
@@ -1453,32 +1457,36 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
 }
 
 struct CloudReadingsView: View {
+    @Environment(\.locale) private var locale
     @ObservedObject var model: CloudModel
     var body: some View {
+        let _ = locale
         VStack(alignment: .leading) {
-            Text(model.status).font(.caption)
-            Text(model.budget).font(.caption)
+            Text(DockL10n.text(model.status)).font(.caption)
+            Text(model.me?.budget ?? "").font(.caption)
             if model.snapshot?.cachedSubset == true {
-                Text("Offline cache: first 50 slots only, not the complete account list. Original observation times retained.").font(.caption)
+                Text(DockL10n.text("Offline cache: first 50 slots only, not the complete account list. Original observation times retained.")).font(.caption)
             }
             ForEach(model.snapshot?.accounts ?? []) { account in
                 Text("\(account.provider.displayName) · \(account.id.uuidString.prefix(8))").font(.caption)
                 ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
-                if account.lastError != nil { Text("Last collection unavailable; original observation retained.").font(.caption) }
+                if account.lastError != nil { Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption) }
             }
-            Text("Watch/widgets show the first server-listed account per provider only, from sanitized cache.").font(.caption)
+            Text(DockL10n.text("Watch/widgets show the first server-listed account per provider only, from sanitized cache.")).font(.caption)
         }
     }
 }
 
 struct CloudBatchView: View {
+    @Environment(\.locale) private var locale
     let slots: [CloudAccount]
     let ids: [UUID]
     let locked: Bool
     let select: ([UUID]) -> Void
     var body: some View {
-        Section("Refresh batch · \(ids.count)/50") {
-            Text("Force, foreground auto and new Live use these slots. First 50 are selected initially; registration remains tier-dependent. Stop Live before changing its batch; resumed Live keeps the server's slot set.").font(.caption)
+        let _ = locale
+        Section(DockL10n.format("Refresh batch · %d/50", ids.count)) {
+            Text(DockL10n.text("Force, foreground auto and new Live use these slots. First 50 are selected initially; registration remains tier-dependent. Stop Live before changing its batch; resumed Live keeps the server's slot set.")).font(.caption)
             ForEach(slots) { slot in
                 Toggle(isOn: Binding(get: {
                     ids.contains(slot.id)
@@ -1500,18 +1508,20 @@ struct CloudBatchView: View {
 #if DEBUG
 // Isolated UI sample: no Apple identity, session, entitlement or network client.
 struct CloudBatchPreview: View {
+    @Environment(\.locale) private var locale
     @State private var selection: [UUID] = []
     private let slots = [ProviderID.claude, .codex, .codex, .gemini, .grok].enumerated().map { index, provider in
         CloudAccount(id: UUID(uuidString: "0000000\(index)-0000-4000-8000-000000000000")!, provider: provider)
     }
     var body: some View {
+        let _ = locale
         NavigationStack {
             Form {
-                Text("DEMO · selection sample only, no account or server").font(.headline)
+                Text(DockL10n.text("DEMO · selection sample only, no account or server")).font(.headline)
                 CloudBatchView(slots: slots, ids: selection, locked: false) { ids in
                     if ids.isEmpty || CloudBatchSelection.valid(ids, slots: slots) { selection = ids }
                 }
-            }.navigationTitle("Refresh selection")
+            }.navigationTitle(DockL10n.text("Refresh selection"))
                 .onAppear { selection = [slots[0].id, slots[2].id] }
         }
     }
@@ -1519,6 +1529,7 @@ struct CloudBatchPreview: View {
 #endif
 
 struct CloudView: View {
+    @Environment(\.locale) private var locale
     @ObservedObject var model: CloudModel
     @State private var quotaStorageConsent = false
     @State private var collectorProcessingConsent = false
@@ -1529,50 +1540,51 @@ struct CloudView: View {
     @State private var selectedSlots = Set<UUID>()
     @State private var collectorConsent = false
     var body: some View {
+        let _ = locale
         Form {
-            Text(model.status).font(.caption)
+            Text(DockL10n.text(model.status)).font(.caption)
             if model.session == nil {
-                TextField("Trusted HTTPS server", text: $base).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.busy)
-                Text("Only connect to a server you trust. The server stores sanitized quota, a pseudonymous Apple account, sessions and refresh counters — not provider credentials. A local collector processes quota for your slots. You can instead use Pair bridge without cloud.")
-                Toggle("Store sanitized quota and account metadata", isOn: $quotaStorageConsent).disabled(model.busy)
-                Toggle("Allow local collector quota processing", isOn: $collectorProcessingConsent).disabled(model.busy)
-                Text("Both consents are required for cloud. Purchases require configured Apple products and server verification.").font(.caption).foregroundStyle(.secondary)
-                Button("Connect with Apple") {
+                TextField(DockL10n.text("Trusted HTTPS server"), text: $base).textInputAutocapitalization(.never).autocorrectionDisabled().disabled(model.busy)
+                Text(DockL10n.text("Only connect to a server you trust. The server stores sanitized quota, a pseudonymous Apple account, sessions and refresh counters — not provider credentials. A local collector processes quota for your slots. You can instead use Pair bridge without cloud."))
+                Toggle(DockL10n.text("Store sanitized quota and account metadata"), isOn: $quotaStorageConsent).disabled(model.busy)
+                Toggle(DockL10n.text("Allow local collector quota processing"), isOn: $collectorProcessingConsent).disabled(model.busy)
+                Text(DockL10n.text("Both consents are required for cloud. Purchases require configured Apple products and server verification.")).font(.caption).foregroundStyle(.secondary)
+                Button(DockL10n.text("Connect with Apple")) {
                     let trustedBase = base
                     let storage = quotaStorageConsent
                     let processing = collectorProcessingConsent
                     Task { await model.connect(base: trustedBase, quotaStorageConsent: storage, collectorProcessingConsent: processing) }
                 }.disabled(!quotaStorageConsent || !collectorProcessingConsent || model.busy)
             } else {
-                Text(model.budget)
+                Text(model.me?.budget ?? "")
                 if model.snapshot?.cachedSubset == true {
-                    Text("Offline cache: first 50 slots only, not the complete account list. Read the server for all slots.").font(.caption)
+                    Text(DockL10n.text("Offline cache: first 50 slots only, not the complete account list. Read the server for all slots.")).font(.caption)
                 }
-                Text("Local collector required. Provider credentials remain on your computer.")
+                Text(DockL10n.text("Local collector required. Provider credentials remain on your computer."))
                 if let me = model.me {
-                    Toggle("Local collector automatic updates", isOn: Binding(get: { model.me?.backgroundCollection ?? true }, set: { enabled in
+                    Toggle(DockL10n.text("Local collector automatic updates"), isOn: Binding(get: { model.me?.backgroundCollection ?? true }, set: { enabled in
                         Task { await model.mutate(path: "v2/settings", method: "PUT", body: ["autoMinutes": me.autoMinutes, "backgroundCollection": enabled]) }
                     })).disabled(model.busy || model.liveEnabled)
-                    Text("The local computer must stay online. Its due checks run about every 20 minutes; the server enforces your tier interval. This is independent of the phone's foreground setting, not guaranteed iOS background execution.").font(.caption)
+                    Text(DockL10n.text("The local computer must stay online. Its due checks run about every 20 minutes; the server enforces your tier interval. This is independent of the phone's foreground setting, not guaranteed iOS background execution.")).font(.caption)
                     if me.tier == .pro {
-                        Picker("Due-check interval", selection: Binding(get: { model.me?.autoMinutes ?? 20 }, set: { minutes in
+                        Picker(DockL10n.text("Due-check interval"), selection: Binding(get: { model.me?.autoMinutes ?? 20 }, set: { minutes in
                             Task { await model.mutate(path: "v2/settings", method: "PUT", body: ["autoMinutes": minutes]) }
                         })) {
-                            ForEach(me.limits.allowedAutoMinutes, id: \.self) { Text("\($0) minutes").tag($0) }
+                            ForEach(me.limits.allowedAutoMinutes, id: \.self) { Text(DockL10n.format("%d minutes", $0)).tag($0) }
                         }.disabled(model.busy || model.liveEnabled)
                     }
                     if me.limits.live {
-                        Text("Paid Live: explicit opt-in, target 60-second foreground checks. One allowance begins on first fresh success; the server's 30-minute wall deadline continues while hidden or locked. Resuming uses the same server session.").font(.caption)
-                        Button(model.liveEnabled ? "Live checks running" : "Start / resume Live") { model.startLive() }
+                        Text(DockL10n.text("Paid Live: explicit opt-in, target 60-second foreground checks. One allowance begins on first fresh success; the server's 30-minute wall deadline continues while hidden or locked. Resuming uses the same server session.")).font(.caption)
+                        Button(DockL10n.text(model.liveEnabled ? "Live checks running" : "Start / resume Live")) { model.startLive() }
                             .disabled(model.busy || model.liveEnabled || model.slots.isEmpty)
-                        Button("Stop Live session") { Task { await model.stopLive() } }
-                        if let deadline = model.liveDeadline { Text("Live ends: \(deadline.formatted())").font(.caption) }
-                    } else { Text("Live requires a server-verified paid entitlement.").font(.caption) }
+                        Button(DockL10n.text("Stop Live session")) { Task { await model.stopLive() } }
+                        if let deadline = model.liveDeadline { Text(DockL10n.format("Live ends: %@", DockL10n.date(deadline))).font(.caption) }
+                    } else { Text(DockL10n.text("Live requires a server-verified paid entitlement.")).font(.caption) }
                 }
-                Picker("New slot", selection: $provider) {
+                Picker(DockL10n.text("New slot"), selection: $provider) {
                     ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.self) { Text($0.displayName).tag($0) }
                 }
-                Button("Add provider slot") { Task { await model.mutate(path: "v2/accounts", method: "POST", body: ["provider": provider.rawValue]) } }.disabled(model.busy || model.liveEnabled || model.me == nil || model.me?.limits.accounts.map { model.slots.count >= $0 } == true)
+                Button(DockL10n.text("Add provider slot")) { Task { await model.mutate(path: "v2/accounts", method: "POST", body: ["provider": provider.rawValue]) } }.disabled(model.busy || model.liveEnabled || model.me == nil || model.me?.limits.accounts.map { model.slots.count >= $0 } == true)
                 CloudBatchView(slots: model.slots, ids: model.refreshSelection.ids, locked: model.busy || model.selectionLocked) { ids in
                     model.selectRefreshSlots(ids)
                 }
@@ -1580,17 +1592,17 @@ struct CloudView: View {
                     VStack(alignment: .leading) {
                         Text("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))")
                         Text(slot.id.uuidString).font(.caption).textSelection(.enabled)
-                        Button("Copy nonsecret slot UUID") { UIPasteboard.general.string = slot.id.uuidString }
+                        Button(DockL10n.text("Copy nonsecret slot UUID")) { UIPasteboard.general.string = slot.id.uuidString }
                         if let account = model.snapshot?.accounts.first(where: { $0.id == slot.id }) {
                             ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
-                            if account.lastError != nil { Text("Last collection unavailable; original observation retained.").font(.caption) }
-                        } else { Text("Unknown — awaiting local collector") }
-                        Button("Remove slot", role: .destructive) { Task { await model.mutate(path: "v2/accounts/\(slot.id.uuidString)", method: "DELETE") } }.disabled(model.busy || model.liveEnabled)
+                            if account.lastError != nil { Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption) }
+                        } else { Text(DockL10n.text("Unknown — awaiting local collector")) }
+                        Button(DockL10n.text("Remove slot"), role: .destructive) { Task { await model.mutate(path: "v2/accounts/\(slot.id.uuidString)", method: "DELETE") } }.disabled(model.busy || model.liveEnabled)
                     }
                 }
-                Section("Local collector approval") {
-                    Text("Duplicate-provider slots require independent CLI account mappings; Gemini remains limited to one local account. Approval authorizes slot access, not validation of real provider identities. It grants quota jobs for these slots only, not your Apple session. Never copy or export the Apple session.").font(.caption)
-                    TextField("Eight uppercase hex pairing code", text: $collectorCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
+                Section(DockL10n.text("Local collector approval")) {
+                    Text(DockL10n.text("Duplicate-provider slots require independent CLI account mappings; Gemini remains limited to one local account. Approval authorizes slot access, not validation of real provider identities. It grants quota jobs for these slots only, not your Apple session. Never copy or export the Apple session.")).font(.caption)
+                    TextField(DockL10n.text("Eight uppercase hex pairing code"), text: $collectorCode).textInputAutocapitalization(.characters).autocorrectionDisabled()
                         .onChange(of: collectorCode) { _, _ in collectorConsent = false }
                     ForEach(model.slots) { slot in
                         Toggle("\(slot.provider.displayName) · \(slot.id.uuidString)", isOn: Binding(get: { selectedSlots.contains(slot.id) }, set: { enabled in
@@ -1598,8 +1610,8 @@ struct CloudView: View {
                             collectorConsent = false
                         }))
                     }
-                    Toggle("I authorize this collector to process the selected slots", isOn: $collectorConsent)
-                    Button("Approve selected slots") {
+                    Toggle(DockL10n.text("I authorize this collector to process the selected slots"), isOn: $collectorConsent)
+                    Button(DockL10n.text("Approve selected slots")) {
                         let code = collectorCode
                         let ids = selectedSlots
                         guard collectorConsent, CollectorApproval.valid(code: code, selected: ids, slots: model.slots) else { return }
@@ -1607,19 +1619,19 @@ struct CloudView: View {
                         Task { await model.mutate(path: "v2/collector/approve", method: "POST", body: ["code": code, "accountIds": ids.map(\.uuidString).sorted()]) }
                     }.disabled(!collectorConsent || !CollectorApproval.valid(code: collectorCode, selected: selectedSlots, slots: model.slots) || model.busy || model.liveEnabled)
                     ForEach(model.collectors) { collector in
-                        Text("Collector \(collector.id.uuidString) · expires \(collector.expiresAt.formatted())").font(.caption)
+                        Text(DockL10n.format("Collector %@ · expires %@", collector.id.uuidString, DockL10n.date(collector.expiresAt))).font(.caption)
                         Text(collector.accountIds.map(\.uuidString).joined(separator: "\n")).font(.caption).textSelection(.enabled)
-                        Button("Revoke collector", role: .destructive) { Task { await model.mutate(path: "v2/collectors/\(collector.id.uuidString)", method: "DELETE") } }.disabled(model.busy || model.liveEnabled)
+                        Button(DockL10n.text("Revoke collector"), role: .destructive) { Task { await model.mutate(path: "v2/collectors/\(collector.id.uuidString)", method: "DELETE") } }.disabled(model.busy || model.liveEnabled)
                     }
-                    Text("Collector list requires a successful server read; an unavailable list is not proof of revocation.").font(.caption)
+                    Text(DockL10n.text("Collector list requires a successful server read; an unavailable list is not proof of revocation.")).font(.caption)
                 }
-                Button("Force refresh (verified budget applies)") { Task { await model.refresh(force: true) } }.disabled(model.busy || model.liveEnabled)
-                Button("Read cached snapshot") { Task { await model.read() } }
-                Button("Log out", role: .destructive) { Task { await model.disconnect(delete: false) } }
-                Button("Delete cloud account and data", role: .destructive) { confirmDelete = true }
+                Button(DockL10n.text("Force refresh (verified budget applies)")) { Task { await model.refresh(force: true) } }.disabled(model.busy || model.liveEnabled)
+                Button(DockL10n.text("Read cached snapshot")) { Task { await model.read() } }
+                Button(DockL10n.text("Log out"), role: .destructive) { Task { await model.disconnect(delete: false) } }
+                Button(DockL10n.text("Delete cloud account and data"), role: .destructive) { confirmDelete = true }
             }
             SubscriptionsView(store: model.purchases)
-        }.navigationTitle("Optional cloud")
+        }.navigationTitle(DockL10n.text("Optional cloud"))
             .onChange(of: base) { _, _ in
                 quotaStorageConsent = false; collectorProcessingConsent = false
             }
@@ -1630,8 +1642,8 @@ struct CloudView: View {
             .onChange(of: model.slots.map(\.id)) { _, ids in
                 selectedSlots.formIntersection(Set(ids)); collectorConsent = false
             }
-            .confirmationDialog("Permanently erase cloud account, quota and all sessions?", isPresented: $confirmDelete) {
-                Button("Erase account", role: .destructive) { Task { await model.disconnect(delete: true) } }
+            .confirmationDialog(DockL10n.text("Permanently erase cloud account, quota and all sessions?"), isPresented: $confirmDelete) {
+                Button(DockL10n.text("Erase account"), role: .destructive) { Task { await model.disconnect(delete: true) } }
             }
     }
 }

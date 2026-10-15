@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 const secret = 'a'.repeat(64);
+test.use({ locale: 'ko-KR' });
 const snapshot = () => ({ schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: new Date().toISOString(), windows: [{ label: 'Session', remainingPercent: 42, resetsAt: null }] }] });
 async function pair(page: Page) { await page.locator('#token').fill(secret); await page.getByRole('button', { name: '연결하기' }).click(); }
 test('safe bearer pairing; malformed, oversized and rejected fetch retains original cache; disconnect focus', async ({ page }) => {
@@ -17,7 +18,7 @@ test('safe bearer pairing; malformed, oversized and rejected fetch retains origi
     await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42'); await expect(page.locator('.provider').first()).toContainText('STALE'); expect(await page.locator('#updated').textContent()).toBe(updated);
   }
   rejected = true; await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('연결 오류');
-  await page.locator('#disconnect').click(); await expect(page.locator('#endpoint')).toBeFocused(); await expect(page.locator('#mode')).toHaveText('NOT CONNECTED'); await expect(page.getByRole('progressbar')).toHaveCount(0); expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+  await page.locator('#disconnect').click(); await expect(page.locator('#endpoint')).toBeFocused(); await expect(page.locator('#mode')).toHaveText('연결되지 않음'); await expect(page.getByRole('progressbar')).toHaveCount(0); expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
 test('cross-origin, userinfo, path, query and fragment rejected before bearer sends', async ({ page }) => {
   let calls = 0; page.on('request', r => { if (r.headers().authorization) calls++; }); await page.goto('/');
@@ -35,7 +36,7 @@ test('disconnect cancels late response and reconnect isolates generations', asyn
   let release: (() => void) | undefined;
   await page.route('**/v1/snapshot', async r => { await new Promise<void>(resolve => { release = resolve; }); await r.fulfill({ json: snapshot() }).catch(() => {}); });
   await page.goto('/'); await pair(page); await expect(page.locator('#refresh')).toBeDisabled(); await page.locator('#disconnect').click(); release?.();
-  await expect(page.locator('#mode')).toHaveText('NOT CONNECTED'); await expect(page.getByRole('progressbar')).toHaveCount(0);
+  await expect(page.locator('#mode')).toHaveText('연결되지 않음'); await expect(page.getByRole('progressbar')).toHaveCount(0);
   await page.unroute('**/v1/snapshot'); await page.route('**/v1/snapshot', r => r.fulfill({ json: snapshot() })); await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
 });
 test('60s checks, manual-only setting and keyboard focus', async ({ page }) => {

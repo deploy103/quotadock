@@ -91,18 +91,61 @@ final class DockModel: ObservableObject {
 @main
 struct QuotaDockApp: App {
     @StateObject private var model = DockModel()
+    @StateObject private var settings = InterfaceSettings()
+    @State private var needsSetup = !SetupStore.load().completed
+    @State private var initialRoute = SetupRoute.later
     @Environment(\.scenePhase) private var scenePhase
+    init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--reset-setup-test") {
+            // Simulator UI tests reset only local setup, never credentials or quota cache.
+            UserDefaults.standard.removeObject(forKey: SetupStore.key)
+            UserDefaults.standard.removeObject(forKey: RefreshSettings.foregroundKey)
+            _needsSetup = State(initialValue: true)
+        }
+        #endif
+    }
+    private var setupPreview: SetupStep? {
+        #if DEBUG
+        return SetupStep.allCases.first { ProcessInfo.processInfo.arguments.contains("--onboarding-\($0.rawValue)-preview") }
+        #else
+        return nil
+        #endif
+    }
+    private var previewBypassesSetup: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("--demo") && setupPreview == nil &&
+            !ProcessInfo.processInfo.arguments.contains("--reset-setup-test")
+        #else
+        return false
+        #endif
+    }
+    private var showingSetup: Bool { setupPreview != nil || (needsSetup && !previewBypassesSetup) }
     var body: some Scene {
         WindowGroup {
-            DockView(model: model)
+            Group {
+                if showingSetup {
+                    FirstRunView(settings: settings, previewStep: setupPreview) { route in
+                        initialRoute = route
+                        needsSetup = false
+                    }
+                } else {
+                    DockView(model: model, settings: settings, initialRoute: initialRoute)
+                }
+            }
+                .environment(\.locale, settings.locale)
                 .tint(DockTheme.mint)
-                .task {
+                .task(id: showingSetup) {
                     WatchSync.shared.start()
+                    model.cloud.foreground = scenePhase == .active && !showingSetup
+                    guard !showingSetup, initialRoute == .later else { return }
                     if RefreshSettings.foregroundEnabled() { await model.refresh(automatic: true) }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    model.cloud.foreground = phase == .active
-                    if phase == .active && RefreshSettings.foregroundEnabled() { Task { await model.refresh(automatic: true) } }
+                    model.cloud.foreground = phase == .active && !showingSetup
+                    if phase == .active && !showingSetup && RefreshSettings.foregroundEnabled() {
+                        Task { await model.refresh(automatic: true) }
+                    }
                 }
         }
     }
@@ -110,8 +153,14 @@ struct QuotaDockApp: App {
 
 struct DockView: View {
     @ObservedObject var model: DockModel
+    @ObservedObject var settings: InterfaceSettings
+    var initialRoute = SetupRoute.later
     @State private var showPairing = false
     @State private var showSettings = false
+    @State private var showSetup = false
+    @State private var reviewAfterSettings = false
+    @State private var pendingRoute: SetupRoute?
+    @State private var openedInitialRoute = false
     @State private var showCloudPreview = false
     @State private var showBatchPreview = false
     @State private var showSurfacePreview = false
@@ -129,21 +178,21 @@ struct DockView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    NavigationLink("Optional cloud account") { CloudView(model: model.cloud) }
+                    NavigationLink(setupText("Optional cloud account")) { CloudView(model: model.cloud) }
                     if model.demo || model.snapshot?.demo == true {
-                        Text("DEMO · sample data, not your account").font(.headline).foregroundStyle(DockTheme.mint)
+                        Text(setupText("DEMO · sample data, not your account")).font(.headline).foregroundStyle(DockTheme.mint)
                     }
-                    Text(model.status).font(.caption).foregroundStyle(.secondary)
+                    Text(DockL10n.text(DockL10n.text(model.status, table: "Setup"))).font(.caption).foregroundStyle(.secondary)
                     if model.cloud.session != nil && !model.demo {
                         CloudReadingsView(model: model.cloud)
                     } else if let snapshot = model.snapshot {
                         ForEach(snapshot.providers) { ProviderCard(provider: $0, demo: snapshot.demo) }
                     } else {
-                        ContentUnavailableView("No readings yet", systemImage: "chart.bar", description: Text("Pair a bridge to see remaining allowances."))
+                        ContentUnavailableView(setupText("No readings yet"), systemImage: "chart.bar", description: Text(setupText("Pair a bridge to see remaining allowances.")))
                     }
-                    Text("Bars show remaining allowance, never a sum. Reset times are informational. Widgets update when the OS allows; Watch uses the last iPhone transfer.")
+                    Text(setupText("Bars show remaining allowance, never a sum. Reset times are informational. Widgets update when the OS allows; Watch uses the last iPhone transfer."))
                         .font(.caption).foregroundStyle(.secondary)
-                    Button(model.demo ? "Leave demo" : "Explore demo") {
+                    Button(setupText(model.demo ? "Leave demo" : "Explore demo")) {
                         model.demo.toggle()
                         model.snapshot = model.demo ? .preview : SnapshotStore.load()
                         if !model.demo && RefreshSettings.foregroundEnabled() { Task { await model.refresh(automatic: true) } }
@@ -153,13 +202,24 @@ struct DockView: View {
                 .navigationTitle("QuotaDock")
                 .refreshable { await model.refresh() }
                 .toolbar {
-                    Button("Settings", systemImage: "gearshape") { showSettings = true }
-                    Button("Pair", systemImage: "link") { showPairing = true }
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+                    Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
+                    Button(setupText("Pair"), systemImage: "link") { showPairing = true }
+                    Button(setupText("Refresh"), systemImage: "arrow.clockwise") { Task { await model.refresh() } }
                         .disabled(model.busy || model.demo)
                 }
                 .sheet(isPresented: $showPairing) { PairingView(model: model) }
-                .sheet(isPresented: $showSettings) { SettingsView() }
+                .sheet(isPresented: $showSettings, onDismiss: {
+                    if reviewAfterSettings { reviewAfterSettings = false; showSetup = true }
+                }) {
+                    SettingsView(settings: settings) { reviewAfterSettings = true; showSettings = false }
+                }
+                .fullScreenCover(isPresented: $showSetup, onDismiss: {
+                    if let route = pendingRoute { pendingRoute = nil; open(route) }
+                }) {
+                    FirstRunView(settings: settings, revisit: true, finish: { route in
+                        pendingRoute = route; showSetup = false
+                    }, cancel: { showSetup = false })
+                }
                 .sheet(isPresented: $showCloudPreview) { NavigationStack { CloudView(model: model.cloud) } }
                 .sheet(isPresented: $showBatchPreview) {
                     #if DEBUG
@@ -186,35 +246,53 @@ struct DockView: View {
                     showBatchPreview = ProcessInfo.processInfo.arguments.contains("--batch-preview")
                     showSurfacePreview = surfacePreview != nil
                     #endif
+                    if !openedInitialRoute { openedInitialRoute = true; open(initialRoute) }
                 }
+        }
+    }
+
+    private func open(_ route: SetupRoute) {
+        switch route {
+        case .demo: model.demo = true; model.snapshot = .preview
+        case .bridge: showPairing = true
+        case .cloud: showCloudPreview = true
+        case .later: break
         }
     }
 }
 
 struct SettingsView: View {
+    @ObservedObject var settings: InterfaceSettings
+    let reviewSetup: () -> Void
     @AppStorage(RefreshSettings.foregroundKey) private var foregroundAutoRefresh = true
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             Form {
+                Section(setupText("Language")) { InterfaceLanguagePicker(settings: settings) }
                 Section {
-                    Toggle("앱을 열 때 새로고침", isOn: $foregroundAutoRefresh)
+                    Button(setupText("Review setup"), action: reviewSetup)
                 } footer: {
-                    Text("끄면 앱에서는 버튼 또는 아래로 당겨 수동으로 새로고침합니다. 연결 실패 시 마지막 관측값과 시간을 유지합니다.")
+                    Text(setupText("Review connection choices and widget guidance without deleting your account or saved readings."))
                 }
-                Section("위젯과 Watch") {
-                    Text("위젯은 저장된 마지막 관측값만 읽으며, 서버나 AI 계정에 직접 접속하지 않습니다. 업데이트 시점은 OS가 결정합니다.")
-                    Text("Watch도 iPhone에서 받은 마지막 관측값을 표시합니다.")
+                Section {
+                    Toggle(setupText("Refresh when I open the app"), isOn: $foregroundAutoRefresh)
+                } footer: {
+                    Text(setupText("When off, use the refresh button or pull to refresh. Connection failures retain the last observation and its time."))
                 }
-                Section("클라우드 자동 수집") {
-                    Text("로컬 수집기가 켜져 있어야 합니다. Free는 2시간, Plus는 1시간, Pro는 20·30·60·120분 중 선택한 간격이 지났는지 서버가 검사합니다. 클라우드 화면에서 자동 수집을 끌 수 있습니다.")
-                    Text("수집 간격은 iOS 백그라운드 실행이나 위젯 새로고침을 보장하지 않습니다.")
+                Section(setupText("Widgets and Watch")) {
+                    Text(setupText("Widgets read only the last saved observations, without connecting to the server or AI accounts. The OS decides when they update."))
+                    Text(setupText("Watch shows the last observations transferred from iPhone."))
+                }
+                Section(setupText("Cloud auto collection")) {
+                    Text(setupText("Your local collector must be online. The server checks whether 2 hours (Free), 1 hour (Plus) or your selected 20, 30, 60 or 120 minutes (Pro) have passed. Turn off auto collection in the cloud screen."))
+                    Text(setupText("A collection interval does not guarantee iOS background execution or widget refreshes."))
                 }
                 Section("Codex") {
-                    Text("Free 플랜 지원은 사용 환경과 출시 단계에 따라 다릅니다. 측정 불가는 Unknown이며, 한도 소진이나 이용 자격 없음을 뜻하지 않습니다.")
+                    Text(setupText("Free plan support varies by environment and rollout. Unavailable measurements mean Unknown, not exhausted allowance or confirmed ineligibility."))
                 }
-            }.navigationTitle("설정")
-                .toolbar { Button("완료") { dismiss() } }
+            }.navigationTitle(setupText("Settings"))
+                .toolbar { Button(setupText("Done")) { dismiss() } }
         }
     }
 }
@@ -228,15 +306,15 @@ struct PairingView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("HTTPS bridge base URL") {
+                Section(setupText("HTTPS bridge base URL")) {
                     TextField("https://bridge.example.com", text: $url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                    SecureField("Pairing token", text: $token)
+                    SecureField(setupText("Pairing token"), text: $token)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
-                Text("Use a trusted HTTPS bridge without cloud. Token stays in this device’s Keychain. Widgets read only sanitized cache. Never enter provider credentials. Saving switches away from cloud and clears readings.")
-                if let error { Text(error).foregroundStyle(.orange) }
-                Button("Save pairing") {
+                Text(setupText("Use a trusted HTTPS bridge without cloud. Token stays in this device’s Keychain. Widgets read only sanitized cache. Never enter provider credentials. Saving switches away from cloud and clears readings."))
+                if let error { Text(setupText(error)).foregroundStyle(.orange) }
+                Button(setupText("Save pairing")) {
                     do {
                         try PairingStore.save(Pairing(baseURL: url.trimmingCharacters(in: .whitespacesAndNewlines), token: token))
                         let old = model.cloud.session
@@ -258,16 +336,16 @@ struct PairingView: View {
                         Task { await model.refresh() }
                     } catch { self.error = "Could not save. Use a valid HTTPS URL and token; check signing entitlements." }
                 }
-                Button("Forget pairing", role: .destructive) {
+                Button(setupText("Forget pairing"), role: .destructive) {
                     PairingStore.remove()
                     model.clearReadings()
                     model.status = "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer."
                     dismiss()
                 }
-            }.navigationTitle("Pair bridge")
-                .toolbar { Button("Cancel") { token = ""; dismiss() } }
+            }.navigationTitle(setupText("Pair bridge"))
+                .toolbar { Button(setupText("Cancel")) { token = ""; dismiss() } }
         }
     }
 }
 
-#Preview { DockView(model: { let model = DockModel(); model.demo = true; model.snapshot = .preview; return model }()) }
+#Preview { DockView(model: { let model = DockModel(); model.demo = true; model.snapshot = .preview; return model }(), settings: InterfaceSettings()) }

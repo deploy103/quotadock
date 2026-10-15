@@ -45,13 +45,24 @@ final class WatchSync: NSObject, WCSessionDelegate {
         }
         #endif
     }
+    func syncLanguage() {
+        #if os(iOS)
+        guard WCSession.isSupported() else { return }
+        onMain {
+            // A language change must never export the in-memory demo screen.
+            self.transfer.reconcile(phoneSnapshot: SnapshotStore.load())
+            self.flush(WCSession.default)
+        }
+        #endif
+    }
     private func onMain(_ action: @escaping () -> Void) {
         if Thread.isMainThread { action() } else { DispatchQueue.main.async(execute: action) }
     }
     private func flush(_ session: WCSession) {
         guard session.activationState == .activated, let data = transfer.pending else { return }
         do {
-            try session.updateApplicationContext(["snapshot": data])
+            try session.updateApplicationContext(["snapshot": data,
+                                                  DockL10n.languageKey: DockL10n.selection().rawValue])
             transfer.accepted()
         } catch {
             // Keep the latest intention for a later send/activation; acceptance
@@ -77,6 +88,10 @@ final class WatchSync: NSObject, WCSessionDelegate {
         // WCSession callbacks are not main-thread callbacks. Do not announce a
         // new cache (or reload widgets) if persistence failed, e.g. before unlock.
         do { try SnapshotStore.save(snapshot) } catch { return }
+        if let raw = applicationContext[DockL10n.languageKey] as? String,
+           let language = DockLanguage(rawValue: raw) {
+            DockL10n.save(language)
+        }
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadAllTimelines()
             NotificationCenter.default.post(name: .snapshotUpdated, object: nil)
