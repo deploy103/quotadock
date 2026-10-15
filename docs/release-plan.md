@@ -1,10 +1,10 @@
 # Release plan and failure contracts
 
-Source-preview plan, 2026-10-14. Implemented code is not a signed release or proof
+Source-preview plan, updated 2026-10-15. Implemented code is not a signed release or proof
 of Apple purchases, provider access, public HTTPS or physical-device behavior.
 Release gates remain open until their real-stack scenarios below pass.
 
-The 12:00 KST gate has passed. [Post-noon application CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
+The historical 2026-10-14 12:00 KST gate passed. [Post-noon application CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
 passed 73 native tests and iPhone/Watch/WidgetKit builds, 30 Node 22 tests and
 10 imported skill tests; the root-only service test also passed separately.
 Private-backend CI passed 127 HTTP/cryptography/disposable PostgreSQL tests.
@@ -12,6 +12,40 @@ Real local TLS and disposable Compose probes reproduced and fixed certificate
 validation, long-fraction timestamp and proxy address-allocation defects.
 Six affected/demo states were inspected. These results validate source contracts,
 not real Apple/provider/device flows or activation of the new server source.
+
+## English/Korean first-run acceptance
+
+The first-run draft records only local route/refresh preferences, never credentials
+or cloud consent. First completion requires an explicit demo, bridge, cloud or later
+choice. Bridge/cloud choices open their real connection screens; they do not create
+authority. Existing paired users choosing Later may resume their existing connection
+when refresh-on-open is enabled. Demo remains in memory and never replaces saved
+observations or becomes the Watch language-sync payload.
+
+Language changes apply immediately, including during a revisited wizard. Cancel
+discards that visit's route/refresh draft, not the global language preference.
+Finishing saves the refresh choice before the completion record; a session-only
+save-failure escape must also honor manual-only refresh. Broken/unsupported drafts
+restart setup without overwriting the prior refresh setting.
+
+The [bilingual baseline](https://github.com/quotadock-dev/quotadock/actions/runs/38662891736)
+passed both EN→KO and KO→EN simulator interaction flows, including retained choices,
+cancel/relaunch and dashboard redraw. Browser contracts exercise stored/blocked
+preferences, retained pairing/readings and demo state. A separate 320px doubled-text
+stress probe found real English selector and Korean heading overflow; the public
+website fix and regression passed [website CI](https://github.com/quotadock-dev/quotadock-web/actions/runs/38664282127).
+This is not Safari zoom, physical-device text sizing or completed release acceptance.
+
+On a signed iPhone, repeat fresh install and upgrade from an existing pairing in
+both languages and System mode. Interrupt each setup step, relaunch, switch language
+with a draft open, cancel a revisit, then finish with refresh-on-open disabled/enabled.
+Confirm the last observed values and timestamps survive; a cloud route still needs
+both separate consents and real Apple authorization. Exercise all three steps and
+connection forms at large accessibility text sizes with VoiceOver, not just captures
+of the top viewport. Add Home/Today/Lock widgets and a paired Watch in each language;
+verify the saved preference eventually propagates without replacing quota with demo.
+OS-scheduled widget reloads and asynchronous Watch delivery have no exact-time promise.
+These signed-device checks remain open.
 
 ## Account and data boundaries
 
@@ -202,6 +236,7 @@ shared-database restore or invalidation requires separate operator approval.
 |---|---|---|
 | Source integration | Real HTTP/Postgres policy tests, simulator native tests and inspected UI states | Post-noon checks above passed; physical-device/provider/Apple behavior remains open |
 | Private pilot | New API healthy, unauthorized requests refused, resource caps preserved; no unrelated services changed | Dedicated VM runs the prior pilot; new source/schema not activated, public DNS/TLS absent |
+| Bilingual first run | Fresh/upgrade setup, interruption, language switch, cancelled draft, manual refresh, large text and VoiceOver in EN/KO/System | Simulator/browser contracts and inspected renders; signed-device acceptance remains open |
 | Identity/device | Valid HTTPS; signed iPhone nonce login, rotation/restart/replay, family expiry, logout and erasure; no credentials in shared caches | Apple Team/provisioning and owner DNS |
 | Provider collection | Actual owned CLI slots; fresh/null/error/stale readings, offline collector and independent account mapping | Real accounts not exercised |
 | StoreKit sandbox | Buy/cancel/Ask to Buy/restore/reinstall, failed delivery retry, renewal/refund/revocation, newer update during delivery, account switch, ownership conflict and deleted-account recreation | App Store products, roots, sandbox configuration and recovery policy |
