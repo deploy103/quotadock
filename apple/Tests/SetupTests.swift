@@ -2,15 +2,15 @@ import XCTest
 @testable import QuotaDock
 
 final class SetupTests: XCTestCase {
-    private func withPreferences(_ check: (UserDefaults) throws -> Void) rethrows {
+    private func withPreferences(_ check: (UserDefaults) -> Void) {
         let name = "QuotaDock.SetupTests.\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: name)!
         defer { preferences.removePersistentDomain(forName: name) }
-        try check(preferences)
+        check(preferences)
     }
 
-    func testInterruptedSetupResumesWithoutEnablingRefreshOrCompleting() throws {
-        try withPreferences { preferences in
+    func testInterruptedSetupResumesWithoutEnablingRefreshOrCompleting() {
+        withPreferences { preferences in
             preferences.set(false, forKey: RefreshSettings.foregroundKey)
             var draft = SetupStore.load(in: preferences)
             XCTAssertEqual(draft.step, .welcome)

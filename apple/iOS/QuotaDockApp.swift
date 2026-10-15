@@ -139,11 +139,11 @@ struct QuotaDockApp: App {
                     WatchSync.shared.start()
                     model.cloud.foreground = scenePhase == .active && !showingSetup
                     guard !showingSetup, initialRoute == .later else { return }
-                    if RefreshSettings.foregroundEnabled() { await model.refresh(automatic: true) }
+                    if settings.foregroundAutoRefresh { await model.refresh(automatic: true) }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     model.cloud.foreground = phase == .active && !showingSetup
-                    if phase == .active && !showingSetup && RefreshSettings.foregroundEnabled() {
+                    if phase == .active && !showingSetup && settings.foregroundAutoRefresh {
                         Task { await model.refresh(automatic: true) }
                     }
                 }
@@ -195,7 +195,7 @@ struct DockView: View {
                     Button(setupText(model.demo ? "Leave demo" : "Explore demo")) {
                         model.demo.toggle()
                         model.snapshot = model.demo ? .preview : SnapshotStore.load()
-                        if !model.demo && RefreshSettings.foregroundEnabled() { Task { await model.refresh(automatic: true) } }
+                        if !model.demo && settings.foregroundAutoRefresh { Task { await model.refresh(automatic: true) } }
                     }
                 }.padding()
             }.background(DockTheme.background)
@@ -264,7 +264,6 @@ struct DockView: View {
 struct SettingsView: View {
     @ObservedObject var settings: InterfaceSettings
     let reviewSetup: () -> Void
-    @AppStorage(RefreshSettings.foregroundKey) private var foregroundAutoRefresh = true
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -276,7 +275,8 @@ struct SettingsView: View {
                     Text(setupText("Review connection choices and widget guidance without deleting your account or saved readings."))
                 }
                 Section {
-                    Toggle(setupText("Refresh when I open the app"), isOn: $foregroundAutoRefresh)
+                    Toggle(setupText("Refresh when I open the app"), isOn: Binding(
+                        get: { settings.foregroundAutoRefresh }, set: { settings.chooseForegroundRefresh($0) }))
                 } footer: {
                     Text(setupText("When off, use the refresh button or pull to refresh. Connection failures retain the last observation and its time."))
                 }

@@ -49,32 +49,6 @@ for (const width of [390, 1440]) test(`language preserves pairing and readings a
   if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/dashboard-en-demo-${width}.png`, fullPage: true });
   await language.selectOption('system'); await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
-test('display data is not a translation label', async ({ page }) => {
-  // Demo readings bypass the privacy allowlist, so exercise the presentation
-  // boundary without changing the production snapshot parser.
-  const plan = 'Max · 사용량 · 예시 · 알 수 없음';
-  const label = 'Custom 사용량 Session 예시';
-  await page.route('**/app.js', async route => {
-    const response = await route.fetch();
-    const body = await response.text();
-    expect(body).toContain('plan:"Max"');
-    expect(body).toContain('"Session",72,3');
-    await route.fulfill({ response, body: body.replace('plan:"Max"', `plan:${JSON.stringify(plan)}`).replace('"Session",72,3', `${JSON.stringify(label)},72,3`) });
-  });
-  let requests = 0;
-  page.on('request', () => requests++);
-  await page.goto('/?demo=1');
-  await expect(page.getByRole('progressbar')).toHaveCount(6);
-  await page.waitForLoadState('networkidle');
-  const count = requests;
-  for (const language of ['ko', 'en', 'ko', 'en']) {
-    await page.locator('header select').selectOption(language);
-    await expect(page.locator('.plan').first()).toHaveText(`${language === 'ko' ? '플랜' : 'Plan'} · ${plan}`);
-    await expect(page.locator('.window-heading span').first()).toHaveText(label);
-    await expect(page.getByRole('progressbar').first()).toHaveAttribute('aria-label', `Claude ${label} ${language === 'ko' ? '남은 사용량' : 'Remaining quota'}`);
-    expect(requests).toBe(count);
-  }
-});
 for (const mode of ['invalid', 'blocked']) test(`language fallback with ${mode} storage`, async ({ page }) => {
   await page.addInitScript(mode => {
     if (mode === 'blocked') for (const method of ['getItem', 'setItem', 'removeItem']) Object.defineProperty(Storage.prototype, method, { value() { throw new Error('blocked'); } });

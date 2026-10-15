@@ -4,6 +4,7 @@ import WidgetKit
 @MainActor
 final class InterfaceSettings: ObservableObject {
     @Published private(set) var language = DockL10n.selection()
+    @Published private(set) var foregroundAutoRefresh = RefreshSettings.foregroundEnabled()
 
     init() {
         #if DEBUG
@@ -19,6 +20,11 @@ final class InterfaceSettings: ObservableObject {
         language = next
         WidgetCenter.shared.reloadAllTimelines()
         if synchronize { WatchSync.shared.syncLanguage() }
+    }
+
+    func chooseForegroundRefresh(_ enabled: Bool, persist: Bool = true) {
+        foregroundAutoRefresh = enabled
+        if persist { UserDefaults.standard.set(enabled, forKey: RefreshSettings.foregroundKey) }
     }
 
     var locale: Locale { Locale(identifier: DockL10n.resolved(language)) }
@@ -78,12 +84,14 @@ enum SetupStore {
         return defaults.data(forKey: key) == data
     }
     static func finish(_ draft: SetupProgress, in defaults: UserDefaults = .standard) -> Bool {
-        guard draft.step == .preferences, draft.route != nil else { return false }
+        guard draft.version == 1, draft.step == .preferences, draft.route != nil else { return false }
         var completed = draft
         completed.completed = true
-        guard save(completed, in: defaults) else { return false }
+        // Apply the user's manual-only choice before recording completion. An
+        // interrupted finish must not skip setup while reverting to auto refresh.
         defaults.set(draft.foregroundAutoRefresh, forKey: RefreshSettings.foregroundKey)
-        return true
+        guard RefreshSettings.foregroundEnabled(in: defaults) == draft.foregroundAutoRefresh else { return false }
+        return save(completed, in: defaults)
     }
 }
 
@@ -121,7 +129,7 @@ struct FirstRunView: View {
         self.cancel = cancel
         var state = SetupStore.load()
         if revisit || state.completed {
-            state = SetupProgress(foregroundAutoRefresh: RefreshSettings.foregroundEnabled())
+            state = SetupProgress(foregroundAutoRefresh: settings.foregroundAutoRefresh)
         }
         if let previewStep {
             state.step = previewStep
@@ -147,29 +155,32 @@ struct FirstRunView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    HStack {
-                        Text("QUOTADOCK").font(.caption.weight(.semibold)).tracking(2)
-                        Spacer()
-                        Text(setupFormat("Step %@ of 3", String(progress.step.index + 1)))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text(title).font(.largeTitle.bold())
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityFocused($headingFocused)
-                        .accessibilityIdentifier("setup-heading")
-                    switch progress.step {
-                    case .welcome: welcome
-                    case .connection: connection
-                    case .preferences: preferences
-                    }
-                    if saveFailed {
-                        Text(setupText("Could not remember setup on this device. Retry or continue for this session; setup may appear again after restarting."))
-                            .font(.callout).foregroundStyle(.orange).accessibilityIdentifier("setup-save-error")
-                    }
-                }.padding(24).frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        HStack {
+                            Text("QUOTADOCK").font(.caption.weight(.semibold)).tracking(2)
+                            Spacer()
+                            Text(setupFormat("Step %@ of 3", String(progress.step.index + 1)))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.id("setup-top")
+                        Text(title).font(.largeTitle.bold())
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityFocused($headingFocused)
+                            .accessibilityIdentifier("setup-heading")
+                        switch progress.step {
+                        case .welcome: welcome
+                        case .connection: connection
+                        case .preferences: preferences
+                        }
+                        if saveFailed {
+                            Text(setupText("Could not remember setup on this device. Retry or continue for this session; setup may appear again after restarting."))
+                                .font(.callout).foregroundStyle(.orange).accessibilityIdentifier("setup-save-error")
+                        }
+                    }.padding(24).frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
+                }
+                .onChange(of: progress.step) { _, _ in scroll.scrollTo("setup-top", anchor: .top) }
             }
             .background(DockTheme.background)
             .safeAreaInset(edge: .bottom) { actions }
@@ -288,7 +299,10 @@ struct FirstRunView: View {
             .buttonStyle(.borderedProminent).tint(DockTheme.mint)
             .disabled(!progress.canContinue).accessibilityIdentifier("setup-continue")
             if saveFailed && progress.step == .preferences, let route = progress.route {
-                Button(setupText("Continue for this session")) { finish(route) }
+                Button(setupText("Continue for this session")) {
+                    settings.chooseForegroundRefresh(progress.foregroundAutoRefresh, persist: false)
+                    finish(route)
+                }
                     .accessibilityIdentifier("setup-session-only")
             }
             if progress.step == .welcome {
@@ -310,6 +324,7 @@ struct FirstRunView: View {
     private func complete() {
         guard let route = progress.route else { return }
         guard SetupStore.finish(progress) else { saveFailed = true; return }
+        settings.chooseForegroundRefresh(progress.foregroundAutoRefresh, persist: false)
         finish(route)
     }
 }

@@ -25,6 +25,7 @@ final class OnboardingUITests: XCTestCase {
         app.launch()
         heading(startKorean ? "다음 프롬프트 전에, 사용량을 한눈에." : "A little clarity before your next prompt.")
         capture(startKorean ? "KO-welcome" : "EN-welcome")
+        app.swipeUp() // Continue is fixed; the next step must still begin at its heading.
         tap(app.buttons["setup-continue"])
         heading(startKorean ? "시작 방법을 선택하세요." : "Choose how to get started.")
         XCTAssertFalse(app.buttons["setup-continue"].isEnabled, "A connection choice is required")
@@ -79,6 +80,16 @@ final class OnboardingUITests: XCTestCase {
         openSettings(korean: korean)
         assertSavedRefresh(korean: korean, value: "0")
 
+        // Existing provider views must redraw too, without replacing their data.
+        tap(app.buttons["interface-language"])
+        tap(app.buttons[startKorean ? "한국어" : "English"])
+        assertSavedRefresh(korean: startKorean, value: "0")
+        tap(app.buttons[startKorean ? "완료" : "Done"])
+        let translatedPlan = app.staticTexts[startKorean ? "요금제: Max" : "Plan: Max"]
+        XCTAssertTrue(translatedPlan.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts[startKorean ? "Plan: Max" : "요금제: Max"].exists)
+        capture(startKorean ? "KO-dashboard-switched" : "EN-dashboard-switched")
+
         app.terminate()
         // Crucially omit --demo too: it otherwise bypasses setup even if completion was lost.
         // Foreground refresh was disabled, so this launch does not request a network refresh.
@@ -86,8 +97,8 @@ final class OnboardingUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["QuotaDock"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["setup-heading"].exists, "Completion must survive Cancel and relaunch")
-        openSettings(korean: korean)
-        assertSavedRefresh(korean: korean, value: "0")
+        openSettings(korean: startKorean)
+        assertSavedRefresh(korean: startKorean, value: "0")
     }
 
     private func openSettings(korean: Bool) {
@@ -105,15 +116,26 @@ final class OnboardingUITests: XCTestCase {
         let element = app.staticTexts["setup-heading"]
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         XCTAssertEqual(element.label, title)
+        XCTAssertTrue(element.isHittable, "A new step must begin at its visible heading")
     }
 
     private func reveal(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
+        let footer = app.buttons["setup-continue"]
+        func visible() -> Bool {
+            guard element.isHittable else { return false }
+            // A partially visible route can be hittable even while its tap point
+            // lies beneath the fixed Continue button. Reveal the complete row.
+            if element.identifier.hasPrefix("setup-route-"), footer.exists {
+                return element.frame.maxY <= footer.frame.minY
+            }
+            return true
+        }
         for _ in 0..<8 {
-            if element.isHittable { return }
+            if visible() { return }
             app.swipeUp()
         }
-        XCTAssertTrue(element.isHittable, "Element must be reachable by scrolling: \(element)")
+        XCTAssertTrue(visible(), "Element must be reachable without footer overlap: \(element)")
     }
 
     private func tap(_ element: XCUIElement) {
