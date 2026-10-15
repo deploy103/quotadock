@@ -1,5 +1,38 @@
 import { test, expect } from '@playwright/test';
 test.use({ locale: 'en-US' });
+test('tabs share language without sharing pairing or refreshing quota', async ({ page, context }) => {
+  const secret = 'b'.repeat(64);
+  let calls = 0;
+  await context.route('**/v1/snapshot', route => {
+    calls++;
+    expect(route.request().headers().authorization).toBe(`Bearer ${secret}`);
+    return route.fulfill({ json: { schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: '2026-01-01T00:00:00.000Z', windows: [{ label: 'Weekly', remainingPercent: 37.5, resetsAt: null }] }] } });
+  });
+  await page.goto('/');
+  await page.locator('#token').fill(secret);
+  await page.locator('#connect-form button[type=submit]').click();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
+  await page.locator('#auto-refresh').uncheck();
+  const second = await context.newPage();
+  await second.goto('/');
+  const language = page.locator('header select');
+  const secondLanguage = second.locator('header select');
+  for (const choice of ['ko', 'en']) {
+    await secondLanguage.selectOption(choice);
+    await expect(language).toHaveValue(choice);
+    await expect(page.locator('html')).toHaveAttribute('lang', choice);
+    await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
+    await expect(page.locator('.window-heading span')).toHaveText(choice === 'ko' ? '주간' : 'Weekly');
+    await expect(page.locator('#auto-refresh')).not.toBeChecked();
+    await expect(page.locator('#disconnect')).toBeVisible();
+    await expect(second.locator('#disconnect')).toBeHidden();
+    await expect(second.getByRole('progressbar')).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem('quotadock.token'))).toBe(secret);
+    expect(await second.evaluate(() => sessionStorage.getItem('quotadock.token'))).toBeNull();
+    expect(calls).toBe(1);
+  }
+  await second.close();
+});
 for (const width of [390, 1440]) test(`language preserves pairing and readings at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 });
   let calls = 0, reject = false;

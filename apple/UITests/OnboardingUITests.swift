@@ -53,9 +53,21 @@ final class OnboardingUITests: XCTestCase {
         let connect = app.buttons["Connect with Apple"]
         reveal(connect)
         XCTAssertFalse(connect.isEnabled)
-        tap(storage)
+        // A Form toggle exposes a full-width accessibility row; tap its
+        // native switch rather than the row's non-interactive label center.
+        tap(storage.switches.firstMatch)
         XCTAssertEqual(storage.value as? String, "1")
+        XCTAssertEqual(collector.value as? String, "0")
         XCTAssertFalse(connect.isEnabled, "One consent cannot authorize Apple sign-in")
+        tap(collector.switches.firstMatch)
+        XCTAssertEqual(collector.value as? String, "1")
+        XCTAssertTrue(connect.isEnabled, "Both explicit consents must enable the sign-in action")
+        tap(storage.switches.firstMatch)
+        XCTAssertEqual(storage.value as? String, "0")
+        XCTAssertEqual(collector.value as? String, "1")
+        XCTAssertFalse(connect.isEnabled, "Withdrawing either consent must disable sign-in")
+        tap(collector.switches.firstMatch)
+        XCTAssertEqual(collector.value as? String, "0")
         capture("EN-setup-cloud-consent")
     }
 

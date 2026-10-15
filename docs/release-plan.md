@@ -36,6 +36,14 @@ stress probe found real English selector and Korean heading overflow; the public
 website fix and regression passed [website CI](https://github.com/quotadock-dev/quotadock-web/actions/runs/38664282127).
 This is not Safari zoom, physical-device text sizing or completed release acceptance.
 
+The later [connection/consent run](https://github.com/quotadock-dev/quotadock/actions/runs/38665613035)
+passed all 83 unit tests and both language-switch interaction flows, but failed the
+new consent interaction: its recorded tap hit the Form row's label, not the native
+switch. The local correction targets the child switch and checks both consent
+activation and withdrawal. That correction has not run on macOS; the latest native
+CI is therefore **not green**. Keep it a release gate rather than treating the
+earlier baseline as verification of the added case. Further publication is on hold.
+
 On a signed iPhone, repeat fresh install and upgrade from an existing pairing in
 both languages and System mode. Interrupt each setup step, relaunch, switch language
 with a draft open, cancel a revisit, then finish with refresh-on-open disabled/enabled.
