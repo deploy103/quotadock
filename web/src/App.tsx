@@ -36,6 +36,7 @@ function App() {
   const [last, setLast] = useState<Snapshot | null>(() => demo ? demoSnapshot() : null);
   const lastRef = useRef(last);
   const [failed, setFailed] = useState(false), [busy, setBusy] = useState(false);
+  const [, setAgeTick] = useState(0);
   const [auto, setAuto] = useState(() => { if (demo) return false; try { return localStorage.getItem('quotadock.auto-refresh') !== 'false'; } catch { return true; } });
   const [autoWarning, setAutoWarning] = useState(false);
   const [status, setStatus] = useState(demo ? 'DEMO · 로컬 예시 데이터입니다' : pair && !auto ? '수동 확인 · 새로고침을 눌러 주세요' : '브리지를 연결해 주세요');
@@ -75,12 +76,19 @@ function App() {
   useEffect(() => { if (auto) void refresh(); return () => { generation.current++; active.current?.abort(); }; }, []);
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
-    function schedule() { clearInterval(timer); timer = undefined; if (!document.hidden && auto && pair) timer = setInterval(() => { void refresh(); }, 60000); }
+    function schedule() {
+      clearInterval(timer); timer = undefined;
+      if (!document.hidden && (pair || demo)) timer = setInterval(() => {
+        // Age cached observations even in manual mode; only automatic mode may fetch.
+        setAgeTick(tick => tick + 1);
+        if (auto && pair) void refresh();
+      }, 60000);
+    }
     function visibility() {
       if (document.hidden) {
         if (inFlight.current) setStatus('확인 중단 · 다시 새로고침할 수 있습니다');
         cancel();
-      }
+      } else if (pair || demo) setAgeTick(tick => tick + 1);
       schedule(); if (!document.hidden && auto && pair) void refresh();
     }
     schedule(); document.addEventListener('visibilitychange', visibility);

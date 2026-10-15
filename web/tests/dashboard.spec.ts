@@ -166,6 +166,31 @@ test('60s checks, manual-only setting and keyboard focus', async ({ page }) => {
   await page.locator('#auto-refresh').uncheck(); await page.clock.fastForward(120000); expect(calls).toBe(2); await page.locator('#refresh').click(); await expect.poll(() => calls).toBe(3);
   await page.locator('#auto-refresh').focus(); await page.keyboard.press('Space'); await expect(page.locator('#auto-refresh')).toBeChecked(); await expect(page.locator('#auto-refresh')).toBeFocused();
 });
+test('manual observations age without fetching or changing timestamps, including after returning to the page', async ({ page }) => {
+  const start = new Date('2026-10-15T00:00:00.000Z');
+  const data = snapshot(); data.generatedAt = data.providers[0].observedAt = start.toISOString();
+  await page.clock.install({ time: new Date(start.getTime() - 60000) }); let calls = 0;
+  await page.route('**/v1/snapshot', route => { calls++; return route.fulfill({ json: data }); });
+  await page.goto('/'); await page.clock.pauseAt(start); await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await page.locator('#auto-refresh').uncheck();
+  const provider = page.locator('.provider').first(), badge = provider.locator('.badge');
+  const updated = await page.locator('#updated').textContent(), observed = await provider.locator('.source').textContent();
+  await page.clock.fastForward(900000); await expect(badge).toHaveText('최근 관측');
+  await page.clock.fastForward(60000); await expect(badge).toContainText('STALE');
+  expect(calls).toBe(1); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  expect(await page.locator('#updated').textContent()).toBe(updated);
+  await expect(provider.locator('.source')).toContainText(observed!);
+  data.generatedAt = data.providers[0].observedAt = new Date(start.getTime() + 960000).toISOString();
+  await page.locator('#refresh').click(); await expect(badge).toHaveText('최근 관측');
+  const refreshed = await page.locator('#updated').textContent();
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.clock.fastForward(960000); expect(calls).toBe(2);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(badge).toContainText('STALE'); expect(calls).toBe(2);
+  await expect(page.locator('#auto-refresh')).not.toBeChecked();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  expect(await page.locator('#updated').textContent()).toBe(refreshed);
+});
 test('manual checks survive reopening and demo visits without restoring automatic requests', async ({ page }) => {
   await page.clock.install(); let calls = 0;
   await page.route('**/v1/snapshot', route => { calls++; return route.fulfill({ json: snapshot() }); });
