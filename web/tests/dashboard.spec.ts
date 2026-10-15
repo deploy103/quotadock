@@ -277,6 +277,28 @@ test('built serving refuses sources and arbitrary paths with unchanged CSP', asy
   for (const path of ['/src/App.tsx', '/src/client.ts', '/package.json', '/icons/LICENSE', '/chunk-unknown.js']) expect((await request.get(path)).status()).toBe(404);
   const response = await request.get('/'); expect(response.headers()['content-security-policy']).toContain("connect-src 'self'"); expect(await response.text()).toContain('/app.js');
 });
+test('a positive quota below display precision is not presented as exhausted', async ({ page }) => {
+  const sample = snapshot();
+  sample.providers[0].windows = [
+    { label: 'Session', remainingPercent: 0.004, resetsAt: null },
+    { label: 'Weekly', remainingPercent: 0, resetsAt: null },
+    { label: 'Daily', remainingPercent: 0.01, resetsAt: null },
+  ];
+  await page.route('**/v1/snapshot', route => route.fulfill({ json: sample }));
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/'); await pair(page);
+  for (const language of ['ko', 'en']) {
+    await page.locator('header select').selectOption(language);
+    await expect(page.locator('.window-heading strong')).toHaveText(language === 'ko'
+      ? ['0.01% 미만 남음', '0% 남음', '0.01% 남음']
+      : ['Less than 0.01% remaining', '0% remaining', '0.01% remaining']);
+    await expect(page.locator('.provider').first().locator('.badge')).toHaveText(language === 'ko' ? '최근 관측' : 'Recent observation');
+    expect(await page.getByRole('progressbar').evaluateAll(bars => bars.map(bar => (bar as HTMLProgressElement).value))).toEqual([0.004, 0, 0.01]);
+    await expect(page.getByRole('progressbar').first()).toHaveAttribute('aria-valuetext', language === 'ko' ? '0.01% 미만 남음' : 'Less than 0.01% remaining');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/readability-tiny-quota-${language}-320.png`, fullPage: true });
+  }
+});
 test('demo desktop/mobile appearance, icons and unknown Grok', async ({ page }) => {
   await page.goto('/?demo=1'); await expect(page.locator('#mode')).toContainText('DEMO'); await expect(page.getByRole('progressbar')).toHaveCount(6); await expect(page.locator('.provider').last().getByRole('progressbar')).toHaveCount(0); await expect(page.locator('#auto-refresh')).toBeDisabled();
   expect(await page.locator('.provider-icon').evaluateAll(images => images.every(img => img instanceof HTMLImageElement && img.naturalWidth > 0))).toBe(true);

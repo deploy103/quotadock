@@ -114,7 +114,8 @@ function App() {
           <div className="readings">{(!p || !p.windows.length) && <p className="unknown">{t(!p ? pair ? '새로고침하여 남은 사용량을 확인하세요.' : '연결 후 남은 사용량을 확인할 수 있어요.' : '사용량을 확인할 수 없습니다. 추정하지 않습니다.')}</p>}
           {p?.windows.map((w, i) => {
             const amount = p.state === 'available' && w.remainingPercent !== null ? Math.min(100, Math.max(0, w.remainingPercent)) : null;
-            return <div key={i} className="window"><div className="window-heading"><span>{windowLabel(w.label)}</span><strong>{amount === null ? t('알 수 없음') : `${number.format(amount)}% ${t('남음')}`}</strong></div>{amount === null ? <p className="unknown">{t('측정된 사용량 없음 · 추정 막대 없음')}</p> : <progress className="track" max={100} value={amount} aria-label={`${name} ${windowLabel(w.label)} ${t('남은 사용량')}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={amount} />}<p className="reset">{t('리셋')} · {date(w.resetsAt)}</p></div>;
+            const remainingText = amount === null ? t('알 수 없음') : `${amount > 0 && amount < 0.01 ? t('0.01% 미만') : `${number.format(amount)}%`} ${t('남음')}`;
+            return <div key={i} className="window"><div className="window-heading"><span>{windowLabel(w.label)}</span><strong>{remainingText}</strong></div>{amount === null ? <p className="unknown">{t('측정된 사용량 없음 · 추정 막대 없음')}</p> : <progress className="track" max={100} value={amount} aria-label={`${name} ${windowLabel(w.label)} ${t('남은 사용량')}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={amount} aria-valuetext={remainingText} />}<p className="reset">{t('리셋')} · {date(w.resetsAt)}</p></div>;
           })}{p?.state === 'error' && <p className="stale">{t('제공자 데이터를 가져오지 못했습니다.')}</p>}
           <p className="source">{p ? p.source === 'demo' ? `${t('DEMO 예시')} · ` : 'CodexBar · ' : ''}{t('관측')} · {p ? date(p.observedAt) : t('없음')}{old ? ` · ${t('오래된 데이터')}` : ''}</p>
           {id === 'codex' && <p className="provider-note">{t('Codex 허용량 · 전체 ChatGPT 사용량 아님')}</p>}
