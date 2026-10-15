@@ -14,6 +14,7 @@ export const english: Readonly<Record<string, string>> = {
   '브리지 연결': 'Connect bridge',
   '이 페이지와 같은 브리지 주소와 페어링 토큰을 입력하세요. AI 서비스 비밀번호가 아닙니다. HTTP는 로컬 루프백만 허용하며 토큰은 이 탭의 세션에만 저장됩니다.': 'Enter this page’s bridge address and pairing token, not your AI service password. HTTP is allowed only on local loopback. The token is stored only in this tab’s session.',
   '세션 저장이 차단되어 이 페이지에서만 연결을 유지합니다.': 'Session storage is blocked; pairing lasts only on this page.',
+  '저장된 연결을 지우지 못했습니다. 현재 페이지의 변경만 적용되며, 다시 열면 이전 연결이 복원될 수 있습니다.': 'Could not remove the saved pairing. Changes apply only on this page; reopening it may restore the previous pairing.',
   '이 페이지와 같은 브리지 주소와 64자리 페어링 토큰을 입력해 주세요. HTTP는 로컬 루프백에서만 가능합니다.': 'Enter the same bridge address as this page and a 64-character pairing token. HTTP is allowed only on local loopback.',
   '브리지 주소': 'Bridge address', '페어링 토큰': 'Pairing token', '64자리 토큰': '64-character token', '연결하기': 'Connect', '연결 해제': 'Disconnect',
   '사용량 보드': 'Quota board', '자동 확인 · 60초': 'Automatic checks · 60 seconds',

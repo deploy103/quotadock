@@ -33,6 +33,7 @@ function App() {
   const [auto, setAuto] = useState(!demo);
   const [status, setStatus] = useState(demo ? 'DEMO · 로컬 예시 데이터입니다' : '브리지를 연결해 주세요');
   const [message, setMessage] = useState('');
+  const [pairingWarning, setPairingWarning] = useState('');
   const generation = useRef(0), active = useRef<AbortController | null>(null), inFlight = useRef(false);
   const endpointInput = useRef<HTMLInputElement>(null);
   function cancel() { generation.current++; active.current?.abort(); active.current = null; inFlight.current = false; setBusy(false); }
@@ -67,7 +68,9 @@ function App() {
   }, [auto, pair]);
   function disconnect() {
     cancel(); pairing.current = null; setPair(null); lastRef.current = null; setLast(null); setFailed(false); setToken(''); setStatus('브리지를 연결해 주세요'); setMessage('');
-    try { sessionStorage.removeItem('quotadock.endpoint'); sessionStorage.removeItem('quotadock.token'); } catch { /* Storage may be disabled. */ }
+    setPairingWarning('');
+    try { sessionStorage.removeItem('quotadock.endpoint'); sessionStorage.removeItem('quotadock.token'); }
+    catch { setPairingWarning('저장된 연결을 지우지 못했습니다. 현재 페이지의 변경만 적용되며, 다시 열면 이전 연결이 복원될 수 있습니다.'); }
     endpointInput.current?.focus();
   }
   return <div className="shell">
@@ -82,10 +85,18 @@ function App() {
             const url = new URL(endpoint), secret = token.trim();
             if (!safeEndpoint(url) || !/^[a-f0-9]{64}$/.test(secret)) throw new Error('pairing');
             cancel(); const next = { endpoint: url.origin, token: secret }; pairing.current = next; setPair(next); setToken(''); lastRef.current = null; setLast(null); setFailed(false); setMessage('');
-            try { sessionStorage.setItem('quotadock.endpoint', next.endpoint); sessionStorage.setItem('quotadock.token', next.token); } catch { setMessage('세션 저장이 차단되어 이 페이지에서만 연결을 유지합니다.'); }
+            try {
+              sessionStorage.setItem('quotadock.endpoint', next.endpoint); sessionStorage.setItem('quotadock.token', next.token);
+              setPairingWarning('');
+            } catch {
+              setPairingWarning('세션 저장이 차단되어 이 페이지에서만 연결을 유지합니다.');
+              // A partial save must not silently restore an older token on reload.
+              try { sessionStorage.removeItem('quotadock.endpoint'); sessionStorage.removeItem('quotadock.token'); }
+              catch { setPairingWarning('저장된 연결을 지우지 못했습니다. 현재 페이지의 변경만 적용되며, 다시 열면 이전 연결이 복원될 수 있습니다.'); }
+            }
             void refresh();
           } catch { setMessage('이 페이지와 같은 브리지 주소와 64자리 페어링 토큰을 입력해 주세요. HTTP는 로컬 루프백에서만 가능합니다.'); }
-        }}><label>{t('브리지 주소')}<input ref={endpointInput} id="endpoint" type="url" required autoComplete="url" placeholder="https://bridge.example.com" value={endpoint} onChange={e => setEndpoint(e.target.value)} /></label><label>{t('페어링 토큰')}<input id="token" type="password" required autoComplete="off" spellCheck={false} placeholder={t('64자리 토큰')} value={token} onChange={e => setToken(e.target.value)} /></label><button type="submit">{t('연결하기')} ↗</button><button id="disconnect" className="secondary" type="button" hidden={!pair} onClick={disconnect}>{t('연결 해제')}</button></form><p id="connection-message" role="alert">{t(message)}</p></section>
+        }}><label>{t('브리지 주소')}<input ref={endpointInput} id="endpoint" type="url" required autoComplete="url" placeholder="https://bridge.example.com" value={endpoint} onChange={e => setEndpoint(e.target.value)} /></label><label>{t('페어링 토큰')}<input id="token" type="password" required autoComplete="off" spellCheck={false} placeholder={t('64자리 토큰')} value={token} onChange={e => setToken(e.target.value)} /></label><button type="submit">{t('연결하기')} ↗</button><button id="disconnect" className="secondary" type="button" hidden={!pair} onClick={disconnect}>{t('연결 해제')}</button></form>{pairingWarning && <p className="stale" role="status">{t(pairingWarning)}</p>}<p id="connection-message" role="alert">{t(message)}</p></section>
       <div className="section-head"><h2>{t('사용량 보드')}</h2><label className="setting"><input id="auto-refresh" type="checkbox" checked={auto} disabled={demo} onChange={e => setAuto(e.target.checked)} /> {t('자동 확인 · 60초')}</label></div><p className="muted small">{t('자동 확인은 화면이 보일 때만 동작합니다. 끄면 수동으로만 확인합니다.')}</p>
       <section id="providers" className="providers" aria-label={t('제공자별 남은 사용량')}>{providerIds.map(id => {
         const name = names[id], p = last?.providers.find(p => p.id === id), old = p?.state === 'available' && (failed || stale(p.observedAt)), sample = demo || last?.demo || p?.source === 'demo';

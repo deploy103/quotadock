@@ -23,6 +23,9 @@ Please allow coordinated remediation before public disclosure.
 - Provider sessions stay with the host's installed CodexBar. Only sanitized
   quota snapshots cross the bridge API boundary.
 - Every snapshot request requires a bearer pairing token. Treat it as a secret.
+- Web pairing uses tab-scoped session storage when available. Disconnect clears
+  the current page, not the server's bearer token. If the browser refuses stored
+  removal, the UI warns that an older pairing may return after reopening.
 - Default loopback HTTP is for the same-host web client. Real devices require
   trusted HTTPS on private networking; never expose publicly without auth.
 - Non-loopback native binding requires both TLS certificate and private key.

@@ -20,6 +20,49 @@ test('safe bearer pairing; malformed, oversized and rejected fetch retains origi
   rejected = true; await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('연결 오류');
   await page.locator('#disconnect').click(); await expect(page.locator('#endpoint')).toBeFocused(); await expect(page.locator('#mode')).toHaveText('연결되지 않음'); await expect(page.getByRole('progressbar')).toHaveCount(0); expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
 });
+test('memory-only pairing warning survives reads and language changes until disconnect or a successful save', async ({ page }) => {
+  let rejected = false;
+  await page.route('**/v1/snapshot', route => rejected ? route.abort() : route.fulfill({ json: snapshot() }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  // An older saved token must not survive a failed replacement's partial write.
+  await page.evaluate(() => { sessionStorage.setItem('quotadock.endpoint', location.origin); sessionStorage.setItem('quotadock.token', 'c'.repeat(64)); });
+  const restoreWrites = await page.evaluateHandle(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (this === sessionStorage && key === 'quotadock.token') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+    return () => { Storage.prototype.setItem = original; };
+  });
+  const koreanWarning = page.getByText('세션 저장이 차단되어 이 페이지에서만 연결을 유지합니다.', { exact: true });
+  const englishWarning = page.getByText('Session storage is blocked; pairing lasts only on this page.', { exact: true });
+  await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await expect(koreanWarning).toBeVisible();
+  expect(await page.evaluate(() => [sessionStorage.getItem('quotadock.endpoint'), sessionStorage.getItem('quotadock.token')])).toEqual([null, null]);
+  await page.locator('header select').selectOption('en'); await expect(englishWarning).toBeVisible();
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/pairing-storage-en-memory-only.png', fullPage: true });
+  rejected = true; await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('Connection error');
+  await expect(englishWarning).toBeVisible(); await expect(page.locator('#connection-message')).toContainText('Check');
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await page.locator('header select').selectOption('ko'); await expect(koreanWarning).toBeVisible();
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/pairing-storage-ko-network-error.png', fullPage: true });
+  await page.locator('#disconnect').click(); await expect(koreanWarning).toBeHidden();
+  rejected = false; await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await expect(koreanWarning).toBeVisible();
+  await restoreWrites.evaluate(restore => restore());
+  await pair(page); await expect(koreanWarning).toBeHidden();
+  expect(await page.evaluate(() => sessionStorage.getItem('quotadock.token'))).toBe(secret);
+  await expect(page.locator('body')).not.toContainText(secret);
+  await page.evaluate(() => { Storage.prototype.removeItem = () => { throw new DOMException('Denied', 'SecurityError'); }; });
+  await page.locator('#disconnect').click();
+  await expect(page.locator('#mode')).toHaveText('연결되지 않음'); await expect(page.getByRole('progressbar')).toHaveCount(0);
+  await expect(page.getByText('저장된 연결을 지우지 못했습니다. 현재 페이지의 변경만 적용되며, 다시 열면 이전 연결이 복원될 수 있습니다.', { exact: true })).toBeVisible();
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/pairing-storage-ko-clear-blocked.png', fullPage: true });
+  await page.locator('header select').selectOption('en');
+  await expect(page.getByText('Could not remove the saved pairing. Changes apply only on this page; reopening it may restore the previous pairing.', { exact: true })).toBeVisible();
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/pairing-storage-en-clear-blocked.png', fullPage: true });
+});
 test('cross-origin, userinfo, path, query and fragment rejected before bearer sends', async ({ page }) => {
   let calls = 0; page.on('request', r => { if (r.headers().authorization) calls++; }); await page.goto('/');
   for (const endpoint of ['https://other.invalid', 'http://other.invalid', 'http://user@127.0.0.1:4317', 'http://127.0.0.1:4317/path', 'http://127.0.0.1:4317/?q=1', 'http://127.0.0.1:4317/#x']) {
