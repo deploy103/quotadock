@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 const secret = 'a'.repeat(64);
 test.use({ locale: 'ko-KR' });
 const snapshot = () => ({ schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: new Date().toISOString(), windows: [{ label: 'Session', remainingPercent: 42, resetsAt: null }] }] });
@@ -19,6 +21,72 @@ test('safe bearer pairing; malformed, oversized and rejected fetch retains origi
   }
   rejected = true; await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('연결 오류');
   await page.locator('#disconnect').click(); await expect(page.locator('#endpoint')).toBeFocused(); await expect(page.locator('#mode')).toHaveText('연결되지 않음'); await expect(page.getByRole('progressbar')).toHaveCount(0); expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+});
+test('HTTP failures give fixed bilingual recovery actions without exposing bodies or replacing observations', async ({ page }) => {
+  let status = 200;
+  await page.route('**/v1/snapshot', route => route.fulfill({ status, body: status === 200 || status === 201 ? JSON.stringify(snapshot()) : 'private diagnostic <script>alert(1)</script> account@example.test', contentType: 'application/json' }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/'); await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await page.locator('#auto-refresh').uncheck();
+  const observed = await page.locator('#updated').textContent();
+  const cases = [
+    { code: 401, ko: '브리지가 페어링을 거부했습니다. 토큰을 확인한 뒤 다시 연결해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge rejected pairing. Check the token and connect again. Existing observations are retained.' },
+    { code: 403, ko: '브리지의 접근 정책이 요청을 거부했습니다. 허용된 주소와 접근 설정을 확인해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge access policy refused this request. Check the allowed address and access settings. Existing observations are retained.' },
+    { code: 429, ko: '브리지 요청이 너무 많습니다. 잠시 기다린 뒤 다시 확인해 주세요. 기존 관측값은 유지합니다.', en: 'Too many bridge requests. Wait before checking again. Existing observations are retained.' },
+    { code: 503, ko: '브리지에서 사용량을 가져오지 못했습니다. 로컬 수집기와 CodexBar 상태를 확인한 뒤 다시 시도해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge could not retrieve usage. Check the local collector and CodexBar before retrying. Existing observations are retained.' },
+  ];
+  for (const scenario of cases) {
+    status = scenario.code; await page.locator('#refresh').click();
+    await expect(page.locator('#connection-message')).toHaveText(scenario.ko);
+    await expect(page.locator('#status')).toContainText('연결 오류');
+    expect(await page.locator('#updated').textContent()).toBe(observed);
+    await page.locator('header select').selectOption('en');
+    await expect(page.locator('#connection-message')).toHaveText(scenario.en);
+    await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+    await expect(page.locator('#refresh')).toBeEnabled();
+    await expect(page.locator('body')).not.toContainText('private diagnostic');
+    await expect(page.locator('body')).not.toContainText('account@example.test');
+    if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/bridge-http-${status}-en.png`, fullPage: true });
+    await page.locator('header select').selectOption('ko');
+    if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/bridge-http-${status}-ko.png`, fullPage: true });
+  }
+  for (status of [201, 500]) {
+    await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('연결 오류');
+    await expect(page.locator('#connection-message')).toContainText('주소, 토큰, HTTPS 인증서');
+    await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  }
+  status = 200; await page.locator('#refresh').click();
+  await expect(page.locator('#status')).toHaveText('남은 사용량을 확인했어요');
+  await expect(page.locator('#connection-message')).toBeEmpty();
+});
+test('an endless HTTP error body stops downloading when recovery is shown', async ({ page }) => {
+  // Serve the real built UI behind a deliberately broken local proxy. An error
+  // body never ends, so merely showing an error must not leave it downloading.
+  const files = new Map(await Promise.all([
+    ['/', 'index.html', 'text/html'], ['/app.js', 'app.js', 'text/javascript'], ['/style.css', 'style.css', 'text/css'],
+  ].map(async ([path, file, type]) => [path, { type, body: await readFile(new URL(`../../web-dist/${file}`, import.meta.url)) }] as const)));
+  let closed = false;
+  const server = createServer((request, response) => {
+    if (request.url === '/v1/snapshot') {
+      response.writeHead(403, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); response.flushHeaders();
+      const timer = setInterval(() => { if (!response.writableNeedDrain) response.write('private diagnostic'.repeat(512)); }, 20);
+      response.once('close', () => { clearInterval(timer); closed = true; });
+      return;
+    }
+    const file = files.get(request.url || '');
+    response.writeHead(file ? 200 : 404, { 'Content-Type': file?.type || 'text/plain' }); response.end(file?.body);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing test listener');
+    await page.goto(`http://127.0.0.1:${address.port}`); await pair(page);
+    await expect(page.locator('#connection-message')).toContainText('브리지의 접근 정책이 요청을 거부했습니다.');
+    await expect(page.locator('#refresh')).toBeEnabled();
+    await expect.poll(() => closed, { timeout: 3000 }).toBe(true);
+    await expect(page.locator('body')).not.toContainText('private diagnostic');
+  } finally {
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });
 test('memory-only pairing warning survives reads and language changes until disconnect or a successful save', async ({ page }) => {
   let rejected = false;

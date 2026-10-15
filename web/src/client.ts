@@ -28,10 +28,18 @@ export function parseSnapshot(s: unknown): Snapshot {
   });
   return Object.freeze({ schemaVersion: 1, demo: s.demo, generatedAt: s.generatedAt, providers: Object.freeze(providers) });
 }
+export class BridgeHTTPError extends Error {
+  constructor(readonly status: number) { super('Bridge request failed'); }
+}
 export async function fetchSnapshot(pair: Pairing, signal: AbortSignal): Promise<Snapshot> {
   if (!safeEndpoint(new URL(pair.endpoint)) || !/^[a-f0-9]{64}$/.test(pair.token)) throw new Error('pairing');
   const response = await fetch(`${pair.endpoint}/v1/snapshot`, { headers: { Authorization: `Bearer ${pair.token}` }, cache: 'no-store', credentials: 'omit', redirect: 'error', signal });
-  if (!response.ok || !response.body) throw new Error('request');
+  if (response.status !== 200) {
+    // Error bodies can contain diagnostics or an unbounded stream. Never read them.
+    void response.body?.cancel().catch(() => {});
+    throw new BridgeHTTPError(response.status);
+  }
+  if (!response.body) throw new Error('request');
   const reader = response.body.getReader();
   const cancel = () => { void reader.cancel().catch(() => {}); };
   signal.addEventListener('abort', cancel, { once: true });

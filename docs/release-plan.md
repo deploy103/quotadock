@@ -214,6 +214,52 @@ stream limit, including silent or trickling bodies. Pairing URLs are limited to
 2,048 UTF-8 bytes and the encoded Keychain item to 8 KiB on both save and load;
 oversized or insecure stored pairings do not start a request.
 
+### Open native gate: failed deletion and interrupted connection switches
+
+The in-memory invalidation described above is not proof of persistent sign-out.
+`PairingStore.remove()` and `CloudSessionStore.remove()` currently discard
+`SecItemDelete` results. If deletion fails and the old item later becomes readable,
+Forget pairing can resume it on refresh, and cloud startup can reload the old
+session. A rejected/expired credential is not thereby proven valid. Successful
+remote revocation still prevents server authentication, but logout cannot rely on
+an unconfirmed remote response. Saving the destination credential before deleting
+the old one also leaves both items after process termination between those writes.
+Cloud-first startup and bridge fallback can then disagree with the last user choice.
+This is a conditional source-level finding, not a reproduced device exploit.
+
+Checked deletion must accept only `errSecSuccess` or `errSecItemNotFound`; another
+status must not produce a successful removal claim. That check alone does not make
+the two-item switch atomic. The proposed correction is a phone-private, device-only
+durable authority selection (`signedOut`, `bridge`, `cloud`), not credentials in
+preferences or shared caches. Cross-mode switches would save the destination,
+commit that selection, then clean up inactive credentials. Sign-out would commit
+`signedOut` before cleanup. Missing/unreadable selected credentials must not select
+the other mode. Cleanup failure must distinguish disconnected from locally erased.
+This proposal is not implemented or approved legacy-migration behavior: markerless
+existing installations need an explicit choice between reconnect-on-upgrade and
+bootstrapping the old cloud-first selection. The latter cannot distinguish a valid
+legacy connection from an earlier unsuccessful deletion.
+
+Before closing this gate, exercise both switch directions and sign-out with delete
+success, not-found and failure; terminate/reconstruct after destination save,
+authority commit and cleanup. Observe the credential reaching actual transport,
+including zero authenticated sends after a committed sign-out. Include selector
+read/write failure, malformed/legacy state, failed replacement and late renewal or
+login completion. Preserve the existing usable-credential replacement guarantee.
+Injected Security statuses can test state transitions but cannot prove device
+Keychain accessibility or termination behavior; signed-device testing remains required.
+
+### Browser recovery boundary verified locally
+
+The React bridge dashboard accepts HTTP 200 only. Fixed EN/KO recovery guidance
+distinguishes pairing refusal (401), access policy (403), throttling (429) and
+collector failure (503); other failures use generic guidance. Error bodies are
+cancelled without parsing, and neither diagnostics nor account addresses enter
+the rendered UI. Last observations and their timestamps survive failure.
+A real local HTTP server's endless 403 stream closes when recovery appears; the
+same browser regression fails with cancellation removed and passes when restored.
+This validates the browser boundary, not actual provider authentication.
+
 The phone's Watch outbox keeps only the latest sanitized intention. Activation
 reconciles from authoritative phone disk: an absent cache queues an empty,
 non-demo snapshot even after process restart. A clear arriving before activation

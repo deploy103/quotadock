@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { demoSnapshot, fetchSnapshot, names, safeEndpoint } from './client';
+import { BridgeHTTPError, demoSnapshot, fetchSnapshot, names, safeEndpoint } from './client';
 import type { Pairing, ProviderId, Snapshot } from './client';
 import { translate, useLanguage } from './locale';
 import { english, koreanWindows } from './translations';
@@ -9,6 +9,12 @@ import '../style.css';
 const demo = new URLSearchParams(location.search).get('demo') === '1';
 const providerIds: readonly ProviderId[] = ['claude', 'codex', 'gemini', 'grok'];
 const stale = (v: string | null) => !v || Date.now() - Date.parse(v) > 900000;
+const bridgeMessages: Readonly<Partial<Record<number, string>>> = {
+  401: '브리지가 페어링을 거부했습니다. 토큰을 확인한 뒤 다시 연결해 주세요. 기존 관측값은 유지합니다.',
+  403: '브리지의 접근 정책이 요청을 거부했습니다. 허용된 주소와 접근 설정을 확인해 주세요. 기존 관측값은 유지합니다.',
+  429: '브리지 요청이 너무 많습니다. 잠시 기다린 뒤 다시 확인해 주세요. 기존 관측값은 유지합니다.',
+  503: '브리지에서 사용량을 가져오지 못했습니다. 로컬 수집기와 CodexBar 상태를 확인한 뒤 다시 시도해 주세요. 기존 관측값은 유지합니다.',
+};
 function restored(): Pairing | null {
   if (demo) return null;
   try {
@@ -50,10 +56,10 @@ function App() {
       if (version !== generation.current) return;
       lastRef.current = snapshot; setLast(snapshot); setFailed(false); setMessage('');
       setStatus(snapshot.providers.some(p => p.state === 'available' && stale(p.observedAt)) ? '오래된 관측 데이터가 있습니다' : '남은 사용량을 확인했어요');
-    } catch {
+    } catch (error) {
       if (version !== generation.current) return;
       setFailed(true); setStatus(lastRef.current ? '연결 오류 · 마지막 데이터 표시 중' : '브리지에 연결하지 못했습니다');
-      setMessage('주소, 토큰, HTTPS 인증서와 브리지의 접근 허용 설정을 확인해 주세요. 자동 확인을 끈 경우 수동으로 다시 확인하세요.');
+      setMessage((error instanceof BridgeHTTPError && bridgeMessages[error.status]) || '주소, 토큰, HTTPS 인증서와 브리지의 접근 허용 설정을 확인해 주세요. 자동 확인을 끈 경우 수동으로 다시 확인하세요.');
     } finally {
       clearTimeout(timeout);
       if (version === generation.current) { inFlight.current = false; active.current = null; setBusy(false); }
