@@ -31,7 +31,7 @@ jobs:
   apple:
     name: iPhone and Watch simulator build and contract tests
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -47,7 +47,22 @@ jobs:
           set -euo pipefail
           DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for k,v in d["devices"].items() if "iOS" in k for x in v if "iPhone" in x["name"]))')
           echo "SIMULATOR_ID=$DEVICE" >> "$GITHUB_ENV"
-          xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath DerivedData test CODE_SIGNING_ALLOWED=NO
+          xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath DerivedData -resultBundlePath NativeTests.xcresult -parallel-testing-enabled NO test CODE_SIGNING_ALLOWED=NO
+      - name: Export native interaction screenshots
+        if: always()
+        working-directory: apple
+        run: |
+          if [ -d NativeTests.xcresult ]; then
+            xcrun xcresulttool export attachments --path NativeTests.xcresult --output-path NativeAttachments
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: native-test-results
+          path: |
+            apple/NativeAttachments
+            apple/NativeTests.xcresult
+          retention-days: 7
       - name: Build Watch app and complications
         working-directory: apple
         run: |
@@ -59,7 +74,7 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl install "$SIMULATOR_ID" DerivedData/Build/Products/Debug-iphonesimulator/QuotaDock.app
           xcrun simctl ui "$SIMULATOR_ID" appearance light
-          xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo
+          xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo --language-en-preview
           sleep 5
           xcrun simctl io "$SIMULATOR_ID" screenshot native-demo.png
           xcrun simctl ui "$SIMULATOR_ID" appearance dark
@@ -68,10 +83,28 @@ jobs:
           xcrun simctl ui "$SIMULATOR_ID" appearance light
           for STATE in unknown settings cloud connection-error cloud-expired cloud-erasing batch widgets widgets-overview widgets-accessories watch watch-stale accessibility purchases purchases-unavailable purchases-pending purchases-error; do
             xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
-            xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo "--${STATE}-preview"
+            xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo --language-en-preview "--${STATE}-preview"
             sleep 3
             xcrun simctl io "$SIMULATOR_ID" screenshot "native-${STATE}.png"
           done
+          for LANGUAGE in en ko; do
+            for STATE in welcome connection preferences; do
+              xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
+              xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo "--language-${LANGUAGE}-preview" "--onboarding-${STATE}-preview"
+              sleep 3
+              xcrun simctl io "$SIMULATOR_ID" screenshot "native-setup-${LANGUAGE}-${STATE}.png"
+            done
+          done
+          for STATE in settings cloud widgets-overview watch purchases; do
+            xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
+            xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo --language-ko-preview "--${STATE}-preview"
+            sleep 3
+            xcrun simctl io "$SIMULATOR_ID" screenshot "native-ko-${STATE}.png"
+          done
+          xcrun simctl terminate "$SIMULATOR_ID" com.quotadock.app
+          xcrun simctl launch "$SIMULATOR_ID" com.quotadock.app --demo --language-ko-preview --onboarding-preferences-preview --large-text-preview
+          sleep 3
+          xcrun simctl io "$SIMULATOR_ID" screenshot native-setup-ko-large.png
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-demo
