@@ -13,11 +13,18 @@ final class DockModel: ObservableObject {
     init() {
         cloud.onSwitch = { [weak self] in self?.clearReadings() }
         cloud.onSnapshot = { [weak self] next in
-            guard let self, !self.demo else { return }
-            try? SnapshotStore.save(next)
+            guard let self, !self.demo, let generation = self.cloud.connectionGeneration else { return }
+            do { try SnapshotStore.save(next, generation: generation) }
+            catch {
+                self.status = "Readings received, but offline cache could not be saved. Original observation times retained."
+                return
+            }
             self.snapshot = next
-            WatchSync.shared.send(next)
+            WatchSync.shared.send()
             WidgetCenter.shared.reloadAllTimelines()
+        }
+        if (try? ConnectionStore.current()) == nil, PairingStore.legacyExists || CloudSessionStore.legacyExists {
+            status = "Reconnect this device. Old connection records are inactive; choose your bridge or cloud account again."
         }
         if ProcessInfo.processInfo.arguments.contains("--demo") {
             demo = true
@@ -47,11 +54,9 @@ final class DockModel: ObservableObject {
 
     func clearReadings() {
         pairingRevision += 1
-        SnapshotStore.clear()
-        CloudCache.clear()
         snapshot = nil
         demo = false
-        WatchSync.shared.send(Snapshot(schemaVersion: 1, generatedAt: Date(), demo: false, providers: []))
+        WatchSync.shared.send()
         WidgetCenter.shared.reloadAllTimelines()
     }
 
@@ -70,12 +75,17 @@ final class DockModel: ObservableObject {
         let revision = pairingRevision
         defer { busy = false }
         do {
-            let next = try await BridgeClient().fetch(PairingStore.load())
+            let generation = try ConnectionStore.current().generation
+            let pairing = try PairingStore.load()
+            let next = try await BridgeClient().fetch(pairing, authorityCheck: {
+                try ConnectionStore.assertBridge(pairing, generation: generation)
+            })
             guard revision == pairingRevision, !demo else { return }
-            try SnapshotStore.save(next)
+            try SnapshotStore.save(next, generation: generation)
             snapshot = next
-            status = "Updated · bridge may serve a cached reading."
-            WatchSync.shared.send(next)
+            status = ConnectionStore.cleanupComplete ? "Updated · bridge may serve a cached reading."
+                : "Connected. Inactive local data cleanup is incomplete; old credentials cannot be selected."
+            WatchSync.shared.send()
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
             guard revision == pairingRevision, !demo else { return }
@@ -326,12 +336,13 @@ struct PairingView: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
                 Text(setupText("Use a trusted HTTPS bridge without cloud. Token stays in this device’s Keychain. Widgets read only sanitized cache. Never enter provider credentials. Saving switches away from cloud and clears readings."))
-                if let error { Text(setupText(error)).foregroundStyle(.orange) }
+                if let error { Text(DockL10n.text(setupText(error))).foregroundStyle(.orange) }
                 Button(setupText("Save pairing")) {
                     do {
                         try PairingStore.save(Pairing(baseURL: url.trimmingCharacters(in: .whitespacesAndNewlines), token: token))
                         let old = model.cloud.session
-                        model.cloud.clear()
+                        model.cloud.resetMemory()
+                        model.clearReadings()
                         let cloudRevision = model.cloud.revision
                         let pairingRevision = model.pairingRevision
                         if let old {
@@ -347,13 +358,26 @@ struct PairingView: View {
                         token = ""
                         dismiss()
                         Task { await model.refresh() }
-                    } catch { self.error = "Could not save. Use a valid HTTPS URL and token; check signing entitlements." }
+                    } catch {
+                        if SnapshotStore.blocked { model.cloud.resetMemory(); model.clearReadings() }
+                        self.error = "Could not save. Use a valid HTTPS URL and token; check signing entitlements."
+                    }
                 }
                 Button(setupText("Forget pairing"), role: .destructive) {
-                    PairingStore.remove()
-                    model.clearReadings()
-                    model.status = "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer."
-                    dismiss()
+                    do {
+                        let selected = try? ConnectionStore.current()
+                        if selected?.mode == .cloud, let credential = selected?.credential {
+                            model.cloud.connectionGeneration = try ConnectionStore.select(.cloud, credential: credential)
+                        } else { try ConnectionStore.select(.signedOut) }
+                        model.clearReadings()
+                        model.status = ConnectionStore.cleanupComplete
+                            ? "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer."
+                            : "Disconnected. Inactive local data cleanup is incomplete; old credentials cannot be selected."
+                        dismiss()
+                    } catch {
+                        model.cloud.resetMemory(); model.clearReadings()
+                        self.error = "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect."
+                    }
                 }
             }.navigationTitle(setupText("Pair bridge"))
                 .toolbar { Button(setupText("Cancel")) { token = ""; dismiss() } }

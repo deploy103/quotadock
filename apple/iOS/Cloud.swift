@@ -257,21 +257,24 @@ struct CloudSnapshot: Codable {
 // Full slot list is local to the iPhone. Only the reduced sanitized v1 projection
 // is exported to App Group / Watch. Neither cache contains a session or identity.
 enum CloudCache {
-    static var url: URL? {
+    static var directory: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("QuotaDock-cloud-snapshot.json")
+            .appendingPathComponent("QuotaDock-cloud", isDirectory: true)
     }
     static func load() -> CloudSnapshot? {
-        guard let url, let attributes = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
-              attributes.isRegularFile == true, let size = attributes.fileSize, size <= 256 * 1024,
-              let data = try? Data(contentsOf: url) else { return nil }
-        return try? CloudSnapshot.decode(data)
+        guard !SnapshotStore.blocked, let files = SnapshotStore.files, let directory,
+              let entry = try? files.read(.cloud, in: directory, maximumBytes: 256 * 1024) else { return nil }
+        return try? CloudSnapshot.decode(entry.data)
     }
-    static func save(_ snapshot: CloudSnapshot) {
-        guard !snapshot.demo, let url, let data = try? snapshot.cacheData() else { return }
-        try? data.write(to: url, options: [.atomic, .completeFileProtection])
+    @discardableResult
+    static func save(_ snapshot: CloudSnapshot, generation: UUID?) -> Bool {
+        guard !SnapshotStore.blocked, !snapshot.demo, let files = SnapshotStore.files, let directory, let generation,
+              let data = try? snapshot.cacheData() else { return false }
+        do {
+            try files.save(data, kind: .cloud, in: directory, generation: generation, maximumBytes: 256 * 1024)
+            return true
+        } catch { return false }
     }
-    static func clear() { if let url { try? FileManager.default.removeItem(at: url) } }
 }
 
 struct CloudSession: Codable {
@@ -367,35 +370,23 @@ enum CloudSessionStore {
         return result
     }
     static func load() -> CloudSession? {
-        var q = query
-        q[kSecReturnData as String] = true
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, data.count <= 4096,
+        guard let record = try? ConnectionStore.current(), record.mode == .cloud,
+              let data = record.credential, data.count <= 4096,
               let session = try? JSONDecoder().decode(CloudSession.self, from: data),
               (try? session.validate()) != nil else { return nil }
         return session
     }
-    static func save(_ session: CloudSession) throws {
-        try save(session, update: SecItemUpdate, add: SecItemAdd)
-    }
-    static func save(_ session: CloudSession,
-                     update: (CFDictionary, CFDictionary) -> OSStatus,
-                     add: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus) throws {
+    static func encoded(_ session: CloudSession) throws -> Data {
         try session.validate()
-        let data = try JSONEncoder().encode(session)
+        let data = try ConnectionStore.encoded(session)
         guard data.count <= 4096 else { throw SnapshotError.invalid }
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
-        let status = update(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            attributes.forEach { item[$0.key] = $0.value }
-            guard add(item as CFDictionary, nil) == errSecSuccess else { throw SnapshotError.unpaired }
-        } else if status != errSecSuccess { throw SnapshotError.unpaired }
+        return data
     }
-    static func remove() { SecItemDelete(query as CFDictionary) }
+    static var legacyExists: Bool { SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess }
+    static func removeLegacy() -> Bool {
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
 }
 
 final class CloudRequestScope {
@@ -416,11 +407,14 @@ struct CloudClient {
     let baseURL: URL
     let token: String?
     let scope: CloudRequestScope?
-    init(baseURL: String, token: String? = nil, scope: CloudRequestScope? = nil) throws {
+    private let authorityCheck: (() throws -> Void)?
+    init(baseURL: String, token: String? = nil, scope: CloudRequestScope? = nil,
+         authorityCheck: (() throws -> Void)? = nil) throws {
         let pairing = try Pairing(baseURL: baseURL, token: token ?? "validation")
         self.baseURL = pairing.endpoint.deletingLastPathComponent().deletingLastPathComponent()
         self.token = token
         self.scope = scope
+        self.authorityCheck = authorityCheck
     }
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, timeout: TimeInterval = 20, encodedBody: Data? = nil) async throws -> Data {
         try Task.checkCancellation()
@@ -447,6 +441,9 @@ struct CloudClient {
             guard (request.httpBody?.count ?? 0) <= 32 * 1024 else { throw SnapshotError.invalid }
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        // The captured credential must still be the selected phone authority at
+        // admission. Detached logout/erasure deliberately have no such lease.
+        try authorityCheck?()
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw SnapshotError.response }
         if response.statusCode == 404 { throw CloudHTTPError.notFound }
@@ -809,6 +806,7 @@ struct CloudPagination {
 @MainActor
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     let purchases = PurchasesModel()
+    var connectionGeneration = try? SnapshotStore.prepareGeneration()
     @Published var session = CloudSessionStore.load() {
         didSet {
             if let oldValue, let session, session.sameAuthority(as: oldValue) { return }
@@ -867,16 +865,21 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     private var challenge: (id: String, base: String, revision: Int)?
     private var controller: ASAuthorizationController?
     private var pollingTask: Task<Void, Never>?
+    private func leasedClient(_ session: CloudSession) throws -> CloudClient {
+        let generation = connectionGeneration
+        return try CloudClient(baseURL: session.baseURL.absoluteString, token: session.token, scope: requests,
+            authorityCheck: { try ConnectionStore.assertCloud(session, generation: generation) })
+    }
     var client: CloudClient? {
         guard let session else { return nil }
         guard session.expiresAt > Date() else {
             if session.familyId == nil { requireSignIn() }
             return nil
         }
-        return try? CloudClient(baseURL: session.baseURL.absoluteString, token: session.token, scope: requests)
+        return try? leasedClient(session)
     }
     func authorizedClient(fetchRenewal: ((Data) async throws -> Data)? = nil,
-                          save: @escaping (CloudSession) throws -> Void = CloudSessionStore.save) async throws -> CloudClient {
+                          save: ((CloudSession) throws -> Void)? = nil) async throws -> CloudClient {
         guard foreground, !Task.isCancelled, let original = session else { throw CancellationError() }
         if let renewalTask {
             let current = revision
@@ -888,22 +891,28 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         // Leave a 60-second read budget plus the accepted 60-second clock
         // allowance and a small margin before reusing an existing bearer.
         if original.pendingRenewal == nil, original.expiresAt.timeIntervalSinceNow > 130 {
-            return try CloudClient(baseURL: original.baseURL.absoluteString, token: original.token, scope: requests)
+            return try leasedClient(original)
         }
         guard let refresh = original.refreshToken, let expiry = original.refreshExpiresAt, expiry > Date() else {
             if original.expiresAt <= Date() { requireSignIn(); throw CloudHTTPError.unauthorized }
-            return try CloudClient(baseURL: original.baseURL.absoluteString, token: original.token, scope: requests)
+            return try leasedClient(original)
         }
         let current = revision
+        let generation = connectionGeneration
         let task = Task { @MainActor () async throws -> CloudClient in
             try Task.checkCancellation()
             guard self.foreground, self.revision == current else { throw CancellationError() }
+            func persist(_ next: CloudSession) throws {
+                guard let previous = self.session else { throw CancellationError() }
+                if let save { try save(next) }
+                else { try ConnectionStore.renew(next, replacing: previous, generation: generation) }
+            }
             var pending = original
             if pending.pendingRenewal == nil {
                 pending.pendingRenewal = UUID()
                 pending.pendingRenewalStartedAt = Date()
                 pending.pendingRenewalSends = 0
-                try save(pending)
+                try persist(pending)
                 self.session = pending
             }
             guard let started = pending.pendingRenewalStartedAt else { throw SnapshotError.invalid }
@@ -914,7 +923,8 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             self.purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
             let body = try JSONSerialization.data(withJSONObject: ["refreshToken": refresh,
                 "idempotencyKey": pending.pendingRenewal!.uuidString.lowercased()], options: [.sortedKeys])
-            let transport = try CloudClient(baseURL: original.baseURL.absoluteString, scope: self.requests)
+            let transport = try CloudClient(baseURL: original.baseURL.absoluteString, scope: self.requests,
+                authorityCheck: { try ConnectionStore.assertCloud(original, generation: generation) })
             let deadline = ProcessInfo.processInfo.systemUptime + (60 - elapsed)
             for attempt in 0..<2 {
                 try Task.checkCancellation()
@@ -925,7 +935,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                     // Reserve each send durably, including a cancelled/unknown
                     // send. Restart must not reset the two-send limit.
                     pending.pendingRenewalSends = (pending.pendingRenewalSends ?? 0) + 1
-                    try save(pending)
+                    try persist(pending)
                     self.session = pending
                     let data: Data
                     if let fetchRenewal { data = try await fetchRenewal(body) }
@@ -934,9 +944,9 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                     try Task.checkCancellation()
                     guard ProcessInfo.processInfo.systemUptime < deadline, self.foreground,
                           self.revision == current, self.session?.token == original.token else { throw CancellationError() }
-                    try save(next)
+                    try persist(next)
                     self.session = next
-                    return try CloudClient(baseURL: next.baseURL.absoluteString, token: next.token, scope: self.requests)
+                    return try self.leasedClient(next)
                 } catch {
                     guard attempt == 0, let delay = CloudHTTPError.retryDelay(error),
                           ProcessInfo.processInfo.systemUptime + delay < deadline else { throw error }
@@ -954,6 +964,12 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         return result
     }
     private func requireSignIn() {
+        let rejected = session
+        var persisted = false
+        if let rejected {
+            do { try ConnectionStore.reject(rejected, generation: connectionGeneration); persisted = true }
+            catch { /* The storage boundary fences restart if authority replacement failed. */ }
+        }
         revision += 1
         CloudRefreshIntentStore.remove()
         requests.cancel()
@@ -962,8 +978,8 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         refreshIntent = nil; busy = false; reading = false; readingRevision = nil; me = nil; session = nil
         liveDeadline = nil; liveStartedAt = nil; liveSlotIDs = []; lastLiveRequest = nil
         collectors = []
-        CloudSessionStore.remove()
-        status = "Sign in again — cloud session expired or rejected. Original observations retained."
+        status = persisted ? "Sign in again — cloud session expired or rejected. Original observations retained."
+            : "Sign in again — connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect."
     }
     private func handleUnauthorized(_ error: Error) -> Bool {
         guard case CloudHTTPError.unauthorized = error else { return false }
@@ -1042,26 +1058,37 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                     try? await CloudClient.revoke(next)
                     throw CancellationError()
                 }
-                // Clear every old-owner cache before replacing credentials.
-                // A crash between these writes must not load old quota under
-                // the newly signed-in account after restart.
-                CloudCache.clear()
-                onSwitch?()
-                do { try CloudSessionStore.save(next) }
+                let generation: UUID
+                do { generation = try ConnectionStore.select(.cloud, credential: CloudSessionStore.encoded(next)) }
                 catch {
+                    resetMemory()
+                    onSwitch?()
+                    status = "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect."
                     try? await CloudClient.revoke(next)
-                    throw error
+                    return
                 }
-                purchases.configure(client: nil, accountToken: nil, available: false, onVerified: {})
-                liveTask?.cancel(); liveEnabled = false; liveDeadline = nil; liveStartedAt = nil
-                liveSlotIDs = []; lastLiveRequest = nil; me = nil; slots = []; snapshot = nil; budget = ""
-                refreshSelection = CloudBatchSelection()
-                PairingStore.remove(); session = next; busy = false
+                let old = session
+                resetMemory()
+                connectionGeneration = generation
+                session = next
+                onSwitch?()
+                if let old {
+                    let selectedRevision = revision
+                    Task {
+                        do { try await CloudClient.revoke(old) }
+                        catch {
+                            guard revision == selectedRevision else { return }
+                            status = "Previous cloud logout unconfirmed. Its login family may remain valid for up to 30 days."
+                        }
+                    }
+                }
                 await read(internalWork: true)
             } catch { if revision == challenge.revision { status = "Server sign-in failed. No cloud session saved." } }
         }
     }
-    func clear() {
+    // Memory-only invalidation after a durable selection; never delete or
+    // select another authority as a side effect of installing the new one.
+    func resetMemory() {
         pollingTask?.cancel()
         CloudRefreshIntentStore.remove()
         refreshIntent = nil
@@ -1072,7 +1099,17 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         busy = false; reading = false; readingRevision = nil
         revision += 1; challenge = nil; controller = nil; session = nil; snapshot = nil; slots = []; budget = ""
         refreshSelection = CloudBatchSelection()
-        CloudSessionStore.remove(); CloudCache.clear(); onSwitch?()
+        connectionGeneration = SnapshotStore.generation
+    }
+    @discardableResult
+    func clear() -> Bool {
+        var committed = false
+        do { try ConnectionStore.select(.signedOut); committed = true }
+        catch { /* Keep the process blocked if either persistent write failed. */ }
+        resetMemory()
+        onSwitch?()
+        if !committed { status = "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect." }
+        return committed
     }
     func disconnect(delete: Bool) async {
         let captured = session
@@ -1084,11 +1121,12 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         // A settings mutation may advance the read revision without switching
         // authority. A cleared session/new Apple challenge is never equivalent.
         guard revision == owner || captured.map({ session?.sameAuthority(as: $0) == true }) == true else { return }
-        clear() // Revoke local authority immediately, including in-flight completions.
+        let locallyDisconnected = clear()
         let current = revision
         if delete {
             busy = true
-            status = "Local account cleared. Waiting for server erasure confirmation."
+            status = locallyDisconnected ? "Local account cleared. Waiting for server erasure confirmation."
+                : "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect."
         }
         defer { if delete, revision == current { busy = false } }
         do {
@@ -1101,8 +1139,16 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                 try await CloudClient.revoke(captured)
             }
             guard revision == current else { return }
-            status = delete ? "Cloud account erased." : "Signed out."
-        } catch { if revision == current { status = "Local session cleared; server erasure/revocation could not be confirmed. Reconnect to retry erasure. A login family may remain valid for up to 30 days." } }
+            if !locallyDisconnected {
+                status = "Server disconnection confirmed, but local persistence failed. Unlock the phone and disconnect again."
+            } else if !ConnectionStore.cleanupComplete {
+                status = "Disconnected. Inactive local data cleanup is incomplete; old credentials cannot be selected."
+            } else { status = delete ? "Cloud account erased." : "Signed out." }
+        } catch { if revision == current {
+            status = locallyDisconnected
+                ? "Local session cleared; server erasure/revocation could not be confirmed. Reconnect to retry erasure. A login family may remain valid for up to 30 days."
+                : "Connection blocked. Local persistence and server disconnection could not be confirmed. Unlock the phone and disconnect again."
+        } }
     }
     func read(internalWork: Bool = false, entitlementsOnly: Bool = false,
               fetchData: ((String) async throws -> Data)? = nil,
@@ -1113,6 +1159,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             return
         }
         let current = revision
+        let generation = connectionGeneration
         reading = true
         readingRevision = current
         defer {
@@ -1159,7 +1206,8 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
                 catch { try Task.checkCancellation(); paired = nil }
             }
             try operation.validate()
-            guard current == revision, let activeSession = session, foreground, !Task.isCancelled else { return }
+            guard current == revision, generation == connectionGeneration,
+                  let activeSession = session, foreground, !Task.isCancelled else { return }
             if let next {
                 let nextSlots = next.accounts.map { CloudAccount(id: $0.id, provider: $0.provider) }
                 slots = nextSlots; snapshot = next
@@ -1198,11 +1246,15 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             budget = verified.budget
             if !verified.limits.live { liveEnabled = false; liveTask?.cancel() }
             if let next {
-                CloudCache.save(next)
+                let cached = CloudCache.save(next, generation: generation)
                 onSnapshot?(next.smallSurfaceSnapshot)
                 status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
                 if !loadedIntent {
                     status = "Cached server observations. Refresh blocked until saved request recovery succeeds; retry reading or explicitly clear/sign out."
+                } else if !cached {
+                    status = "Readings received, but offline cache could not be saved. Original observation times retained."
+                } else if !ConnectionStore.cleanupComplete {
+                    status = "Connected. Inactive local data cleanup is incomplete; old credentials cannot be selected."
                 }
             }
         } catch {
@@ -1230,6 +1282,14 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             pendingEntitlementRead = false
             current = revision
             if method == "DELETE", path.hasPrefix("v2/accounts/") {
+                do {
+                    guard let session else { throw SnapshotError.unpaired }
+                    connectionGeneration = try ConnectionStore.select(.cloud, credential: CloudSessionStore.encoded(session))
+                } catch {
+                    resetMemory(); onSwitch?()
+                    status = "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect."
+                    return
+                }
                 snapshot = nil
                 slots.removeAll { path.hasSuffix($0.id.uuidString) }
                 onSwitch?()

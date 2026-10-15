@@ -142,23 +142,24 @@ final class CloudRetryTests: XCTestCase {
         for session in [CloudSession(baseURL: URL(string: "http://example.invalid")!, token: token, expiresAt: expiry),
                         CloudSession(baseURL: URL(string: "https://example.invalid")!, token: "short", expiresAt: expiry),
                         CloudSession(baseURL: URL(string: "https://example.invalid")!, token: String(repeating: "+", count: 43), expiresAt: expiry)] {
-            XCTAssertThrowsError(try CloudSessionStore.save(session, update: { _, values in
-                stored = (values as NSDictionary)[kSecValueData] as! Data
-                return errSecSuccess
-            }, add: { _, _ in stored = Data(); return errSecSuccess }))
+            XCTAssertThrowsError(try CloudSessionStore.encoded(session))
             XCTAssertEqual(stored, original)
         }
         let valid = CloudSession(baseURL: URL(string: "https://example.invalid")!, token: token, expiresAt: expiry)
-        XCTAssertThrowsError(try CloudSessionStore.save(valid, update: { _, _ in errSecInteractionNotAllowed },
+        let data = try ConnectionRecord(generation: UUID(), mode: .cloud,
+            credential: CloudSessionStore.encoded(valid)).encoded()
+        XCTAssertThrowsError(try ConnectionKeychain.write(data, update: { _, _ in errSecInteractionNotAllowed },
             add: { _, _ in stored = Data(); return errSecSuccess }))
         XCTAssertEqual(stored, original)
-        try CloudSessionStore.save(valid, update: { _, values in
+        try ConnectionKeychain.write(data, update: { _, values in
             let attributes = values as NSDictionary
             XCTAssertEqual(attributes[kSecAttrAccessible] as? String, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
             stored = attributes[kSecValueData] as! Data
             return errSecSuccess
         }, add: { _, _ in stored = Data(); return errSecSuccess })
-        XCTAssertEqual(try JSONDecoder().decode(CloudSession.self, from: stored).token, token)
+        let record = try ConnectionRecord.decode(stored)
+        XCTAssertEqual(record.mode, .cloud)
+        XCTAssertEqual(try JSONDecoder().decode(CloudSession.self, from: XCTUnwrap(record.credential)).token, token)
     }
 
     func testRefreshIntentSavePreservesOriginalOnFailureAndRestoresExactReplacement() throws {

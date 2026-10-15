@@ -203,3 +203,12 @@
 "Server accepted the transaction. Refreshing authoritative account status." = "서버가 거래를 수락했습니다. 서버 기준 계정 상태를 새로고침합니다.";
 "Sign in again before retrying transaction delivery. The Apple transaction remains unfinished." = "거래 전송을 재시도하기 전에 다시 로그인하세요. Apple 거래는 미완료 상태로 유지됩니다.";
 "Server verification could not be confirmed. No new paid status applied; reconnect or restore to retry delivery." = "서버 검증을 확인하지 못했습니다. 새 유료 상태는 적용되지 않았습니다. 다시 연결하거나 구매 복원으로 전송을 재시도하세요.";
+"Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect." = "연결을 차단했습니다. 연결 해제 상태를 저장했는지 확인하지 못했습니다. iPhone 잠금을 해제한 뒤 다시 연결하세요.";
+"Sign in again — connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect." = "다시 로그인하세요. 연결을 차단했지만 연결 해제 상태를 저장했는지 확인하지 못했습니다. iPhone 잠금을 해제한 뒤 다시 연결하세요.";
+"Previous cloud logout unconfirmed. Its login family may remain valid for up to 30 days." = "이전 클라우드 로그아웃을 확인하지 못했습니다. 이전 로그인은 최대 30일 동안 유효할 수 있습니다.";
+"Server disconnection confirmed, but local persistence failed. Unlock the phone and disconnect again." = "서버의 연결 해제는 확인했으나 기기에 저장하지 못했습니다. iPhone 잠금을 해제한 뒤 다시 연결을 해제하세요.";
+"Disconnected. Inactive local data cleanup is incomplete; old credentials cannot be selected." = "연결을 해제했습니다. 사용하지 않는 기기 내 데이터 정리는 끝나지 않았지만 이전 인증 정보로 연결되지는 않습니다.";
+"Connection blocked. Local persistence and server disconnection could not be confirmed. Unlock the phone and disconnect again." = "연결을 차단했습니다. 기기 저장과 서버 연결 해제를 확인하지 못했습니다. iPhone 잠금을 해제한 뒤 다시 연결을 해제하세요.";
+"Readings received, but offline cache could not be saved. Original observation times retained." = "측정값을 받았으나 오프라인 캐시를 저장하지 못했습니다. 원래 관측 시각은 유지됩니다.";
+"Connected. Inactive local data cleanup is incomplete; old credentials cannot be selected." = "연결되었습니다. 사용하지 않는 기기 내 데이터 정리는 끝나지 않았지만 이전 인증 정보로 연결되지는 않습니다.";
+"Reconnect this device. Old connection records are inactive; choose your bridge or cloud account again." = "이 기기를 다시 연결하세요. 이전 연결 정보는 비활성 상태입니다. 브리지 또는 클라우드 계정을 다시 선택하세요.";

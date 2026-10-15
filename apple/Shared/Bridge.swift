@@ -1,5 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Security)
 import Security
+#endif
 
 struct Pairing: Codable {
     let endpoint: URL
@@ -40,6 +45,7 @@ struct Pairing: Codable {
     }
 }
 
+#if os(iOS)
 enum PairingStore {
     private static var query: [String: Any] {
         var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
@@ -52,38 +58,27 @@ enum PairingStore {
     }
 
     static func load() throws -> Pairing {
-        var query = query
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, data.count <= 8192 else { throw SnapshotError.unpaired }
+        let record = try ConnectionStore.current()
+        guard record.mode == .bridge, let data = record.credential else { throw SnapshotError.unpaired }
         return try JSONDecoder().decode(Pairing.self, from: data)
     }
 
     static func save(_ pairing: Pairing) throws {
-        try save(pairing, update: SecItemUpdate, add: SecItemAdd)
-    }
-
-    // Update in place; never delete the usable item to make replacement possible.
-    static func save(_ pairing: Pairing,
-                     update: (CFDictionary, CFDictionary) -> OSStatus,
-                     add: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus) throws {
         try pairing.validate()
-        let data = try JSONEncoder().encode(pairing)
+        let data = try ConnectionStore.encoded(pairing)
         guard data.count <= 8192 else { throw SnapshotError.invalid }
-        let attributes: [String: Any] = [kSecValueData as String: data,
-                                       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
-        let status = update(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            var item = query
-            attributes.forEach { item[$0.key] = $0.value }
-            guard add(item as CFDictionary, nil) == errSecSuccess else { throw SnapshotError.unpaired }
-        } else if status != errSecSuccess { throw SnapshotError.unpaired }
+        try ConnectionStore.select(.bridge, credential: data)
     }
 
-    static func remove() { SecItemDelete(query as CFDictionary) }
+    static var legacyExists: Bool { SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess }
+
+    // Legacy bytes are never an authority source, even when cleanup fails.
+    static func removeLegacy() -> Bool {
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
 }
+#endif
 
 final class HTTPSRedirectPolicy: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -108,7 +103,7 @@ struct BridgeClient {
         self.configuration = configuration
     }
 
-    func fetch(_ pairing: Pairing) async throws -> Snapshot {
+    func fetch(_ pairing: Pairing, authorityCheck: (() throws -> Void)? = nil) async throws -> Snapshot {
         let transport = BridgeTransport()
         do {
             try Task.checkCancellation()
@@ -118,7 +113,7 @@ struct BridgeClient {
             request.setValue("Bearer \(pairing.token)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             let data = try await withTaskCancellationHandler(operation: {
-                try await transport.load(request, configuration: configuration)
+                try await transport.load(request, configuration: configuration, authorityCheck: authorityCheck)
             }, onCancel: { transport.cancel() })
             try Task.checkCancellation()
             return try Snapshot.decode(data).sanitized
@@ -152,11 +147,14 @@ private final class BridgeTransport: NSObject, URLSessionDataDelegate, @unchecke
         queue.maxConcurrentOperationCount = 1
     }
 
-    func load(_ request: URLRequest, configuration: URLSessionConfiguration) async throws -> Data {
+    func load(_ request: URLRequest, configuration: URLSessionConfiguration,
+              authorityCheck: (() throws -> Void)?) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             queue.addOperation {
                 self.continuation = continuation
                 guard !self.cancelled else { self.finish(.failure(BridgeTransportError.transport)); return }
+                do { try authorityCheck?() }
+                catch { self.finish(.failure(BridgeTransportError.transport)); return }
                 let session = URLSession(configuration: configuration, delegate: self, delegateQueue: self.queue)
                 self.session = session
                 let task = session.dataTask(with: request)

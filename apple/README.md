@@ -18,6 +18,14 @@ xcodebuild -project QuotaDock.xcodeproj -target QuotaDockWatchWidgets \
   -sdk watchsimulator build CODE_SIGNING_ALLOWED=NO
 ```
 
+The dependency-free Foundation storage and bridge contracts also run with Swift
+5.9+ on Linux/macOS: `swift test --package-path apple`. Use a non-root account so
+the real read-only-directory cases execute rather than skip. These tests execute
+the production generation fence, authority transitions, bounded cache and bridge
+transport; they do **not** emulate Keychain, UIKit, WidgetKit or WatchConnectivity.
+The latest local run used Swift 6.1.3 on Linux. Native integration still needs
+Xcode and signed-device verification; Linux success does not close those gates.
+
 Before physical-device builds, set `DEVELOPMENT_TEAM`, `BUNDLE_PREFIX`, and `APP_GROUP` in `project.yml` and regenerate. Defaults are `com.quotadock.app` and `group.com.quotadock.app`. Register the four bundle IDs (base, `.widgets`, `.watch`, `.watch.widgets`) and App Group with your team. Enable the group for all four targets. Enable **Sign In with Apple only for the main iOS App ID**, and configure the server's Apple audience to that exact bundle ID. Real sign-in requires the user's Apple Team/provisioning and reachable configured server; unsigned simulator CI only validates compilation, not authentication. The iPhone alone has separate `.bridge` and `.cloud` Keychain groups. Watch/widgets have **no token or Keychain entitlement**. App Groups are local to each device; WatchConnectivity bridges sanitized snapshots between devices.
 
 XcodeGen embeds the iOS widget and modern single-target Watch app into the iPhone app; the Watch app embeds its WidgetKit extension. Generated plists, entitlements and project are ignored. No ATS exceptions, background modes, push capability, or insecure certificate bypass are supplied. The shared iOS/watchOS app icon is an opaque 1024px rendering of `web/favicon.svg`. Release/App Store distribution additionally needs listing artwork, team provisioning and device/OS review.
@@ -44,7 +52,16 @@ Cloud selection is **not consent**: on its separate screen, review the server an
 
 ## Pair and use
 
-Run the bridge behind a trusted, device-reachable HTTPS endpoint (valid TLS certificate), then enter its **base URL** and pairing bearer token in Pair. `/v1/snapshot` is appended. Never enter Claude/OpenAI/other provider credentials. URL and token are held together in device-only, after-first-unlock Keychain; no token goes to UserDefaults, snapshot cache, logs or Watch. Redirects are refused to prevent bearer forwarding. Plain HTTP, URL credentials, queries and fragments are rejected. Forget pairing removes the local token/cache; Watch can retain its old snapshot until a new transfer, and offline widgets can retain OS-rendered content.
+Run the bridge behind a trusted, device-reachable HTTPS endpoint (valid TLS certificate), then enter its **base URL** and pairing bearer token in Pair. `/v1/snapshot` is appended. Never enter Claude/OpenAI/other provider credentials. URL and token are held together in the phone-private, device-only `WhenUnlockedThisDeviceOnly` connection record; no token goes to UserDefaults, snapshot cache, logs or Watch. Redirects are refused to prevent bearer forwarding. Plain HTTP, URL credentials, queries and fragments are rejected. Forget pairing durably disconnects before attempting inactive-data cleanup; unsuccessful persistence or cleanup is reported separately. Watch can retain its old snapshot until a new transfer, and offline widgets can retain OS-rendered content.
+
+Connection authority is one Keychain union: signed out, bridge or cloud, bound to
+the current cache generation. Switching advances the shared generation before
+replacing that union; missing, unreadable or mismatched state never falls back to
+another credential. Legacy installs without this record must **reconnect once**;
+old pairing/session records are not silently imported. Failed cleanup can leave
+inactive bytes on disk without selecting them. If no durable write succeeds,
+persistent disconnection is unconfirmed, not guaranteed across restart. Rejected
+cloud sessions retain sanitized observations after successful authority rejection.
 
 iPhone fetches on foreground activation when refresh-on-open is enabled, and on manual/pull refresh. The bridge may return cached measurements. **All widgets are cache-only timeline readers**, never background bridge/provider/cloud clients. They have neither network client source nor Keychain entitlements. Timeline requests are hints, not guaranteed refresh intervals. Add the **All AI allowances** overview or individual provider widgets to **Home Screen or Today View**, or rectangular/circular/inline widgets on the Lock Screen. Overview shows four providers with icons, freshness and the first window; individual medium widgets show up to two windows plus the plan, while smaller surfaces show the first window. Open the app for every window and reset time. Watch Smart Stack widgets and complications use only the local cache. Open both paired apps and refresh iPhone to initiate WatchConnectivity transfer; no instantaneous/push update promise.
 
@@ -131,15 +148,17 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 
 - `Shared/Snapshot.swift`: contract v1 Codable values, shared 64-byte ASCII ISO8601 quota dates truncated to server milliseconds, explicit null re-encoding, 256 KiB bound, safe-message sanitization and demo samples.
 - `Shared/Bridge.swift`: HTTPS pairing, Keychain and ephemeral URLSession client; rejects redirects/non-200/schema errors.
-- `Shared/SnapshotStore.swift`: atomic sanitized JSON App Group cache.
+- `Shared/CacheFiles.swift` and `Shared/SnapshotStore.swift`: generation-fenced, bounded atomic sanitized JSON cache; inactive-file cleanup never restores an owner.
 - `Shared/WatchSync.swift`: latest application-context transfer, no secrets, Watch cache/timeline reload.
 - `Shared/QuotaViews.swift`: reusable remaining bars/provider cards.
 - `Shared/Localization.swift` and `Resources/`: allowlisted English/Korean presentation, shared language preference and canonical model values.
 - `iOS/FirstRun.swift`: locally resumable setup, explicit route selection and separate session-only/persisted refresh choices.
-- `iOS/Cloud.swift`: real nonce-bound Apple/server authorization, independent Keychain session, v2 account-list decoding, sandbox full-slot cache, foreground collector-job requests and bounded job-ID polling.
+- `iOS/ConnectionState.swift` and `iOS/ConnectionStore.swift`: phone-private Keychain authority union, conditional renewal, checked legacy cleanup and transport admission guards.
+- `iOS/Cloud.swift`: real nonce-bound Apple/server authorization, selected cloud session, v2 account-list decoding, sandbox full-slot cache, foreground collector-job requests and bounded job-ID polling.
 - `iOS/Purchases.swift`: StoreKit product loading, UUID-bound purchase/restore, update recovery and server-accepted delivery. No client-side entitlement assignment.
 - `iOS/`, `Watch/`, `Widgets/`: small native surfaces and timeline adapters.
 - `Tests/ContractTests.swift`: public model decode/encode, nullable values, clamps, staleness, demo, schema/date/size rejection, URL restrictions, request authorization and response sanitization/status tests using URLProtocol (no real credentials or server).
+- `PortableTests/`: restart/switch/logout and real file-permission failures plus URLProtocol bridge bounds/deadlines. Security-adapter tests remain iOS-only.
 - `UITests/OnboardingUITests.swift`: real simulator interaction for language changes, retained choices, cancel/relaunch and separate connection/consent screens. These tests do not perform provider login or Apple authorization.
 
 The [2026-10-15 bilingual baseline](https://github.com/quotadock-dev/quotadock/actions/runs/38662891736)

@@ -203,3 +203,12 @@
 "Server accepted the transaction. Refreshing authoritative account status." = "Server accepted the transaction. Refreshing authoritative account status.";
 "Sign in again before retrying transaction delivery. The Apple transaction remains unfinished." = "Sign in again before retrying transaction delivery. The Apple transaction remains unfinished.";
 "Server verification could not be confirmed. No new paid status applied; reconnect or restore to retry delivery." = "Server verification could not be confirmed. No new paid status applied; reconnect or restore to retry delivery.";
+"Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect." = "Connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect.";
+"Sign in again — connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect." = "Sign in again — connection blocked. Persistent disconnection could not be confirmed; unlock the phone and reconnect.";
+"Previous cloud logout unconfirmed. Its login family may remain valid for up to 30 days." = "Previous cloud logout unconfirmed. Its login family may remain valid for up to 30 days.";
+"Server disconnection confirmed, but local persistence failed. Unlock the phone and disconnect again." = "Server disconnection confirmed, but local persistence failed. Unlock the phone and disconnect again.";
+"Disconnected. Inactive local data cleanup is incomplete; old credentials cannot be selected." = "Disconnected. Inactive local data cleanup is incomplete; old credentials cannot be selected.";
+"Connection blocked. Local persistence and server disconnection could not be confirmed. Unlock the phone and disconnect again." = "Connection blocked. Local persistence and server disconnection could not be confirmed. Unlock the phone and disconnect again.";
+"Readings received, but offline cache could not be saved. Original observation times retained." = "Readings received, but offline cache could not be saved. Original observation times retained.";
+"Connected. Inactive local data cleanup is incomplete; old credentials cannot be selected." = "Connected. Inactive local data cleanup is incomplete; old credentials cannot be selected.";
+"Reconnect this device. Old connection records are inactive; choose your bridge or cloud account again." = "Reconnect this device. Old connection records are inactive; choose your bridge or cloud account again.";

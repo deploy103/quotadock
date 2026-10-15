@@ -1,6 +1,15 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(Security)
 import Security
+#endif
+#if canImport(QuotaDockStorage)
+@testable import QuotaDockStorage
+#else
 @testable import QuotaDock
+#endif
 
 final class BridgeTransportTests: XCTestCase {
     private func client() -> BridgeClient {
@@ -30,6 +39,18 @@ final class BridgeTransportTests: XCTestCase {
             XCTAssertEqual(snapshot.schemaVersion, 1)
             XCTAssertTrue(snapshot.providers.isEmpty)
         }
+    }
+
+    func testRejectedAuthorityNeverStartsTransportAndAllowedAuthorityCanRead() async throws {
+        do {
+            _ = try await client().fetch(Pairing(baseURL: "https://example.invalid/must-not-start", token: "test-token"),
+                authorityCheck: { throw SnapshotError.unpaired })
+            XCTFail("A disconnected credential must not start a request")
+        } catch { XCTAssertEqual(error as? BridgeTransportError, .transport) }
+        let snapshot = try await client().fetch(Pairing(baseURL: "https://example.invalid/exact-cap", token: "test-token"),
+            authorityCheck: {})
+        XCTAssertEqual(snapshot.schemaVersion, 1)
+        XCTAssertTrue(snapshot.providers.isEmpty)
     }
 
     func testAbsoluteDeadlineIncludesSilentHeadersAndSilentBody() async throws {
@@ -86,21 +107,25 @@ final class BridgeTransportTests: XCTestCase {
         }
     }
 
+    #if os(iOS)
     func testFailedReplacementNeverFallsBackToAddAndUsesDeviceOnlyProtection() throws {
         let pairing = try Pairing(baseURL: "https://example.invalid", token: "new-token")
+        let data = try ConnectionRecord(generation: UUID(), mode: .bridge,
+            credential: ConnectionStore.encoded(pairing)).encoded()
         for status in [errSecAuthFailed, errSecInteractionNotAllowed, errSecDuplicateItem] {
-            XCTAssertThrowsError(try PairingStore.save(pairing, update: { _, attributes in
+            XCTAssertThrowsError(try ConnectionKeychain.write(data, update: { _, attributes in
                 let values = attributes as NSDictionary
-                XCTAssertEqual(values[kSecAttrAccessible] as? String, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
+                XCTAssertEqual(values[kSecAttrAccessible] as? String, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
                 return status
             }, add: { _, _ in XCTFail("Must not replace/delete a usable item after update failure"); return errSecSuccess }))
         }
-        XCTAssertThrowsError(try PairingStore.save(pairing, update: { _, _ in errSecItemNotFound }, add: { item, _ in
+        XCTAssertThrowsError(try ConnectionKeychain.write(data, update: { _, _ in errSecItemNotFound }, add: { item, _ in
             XCTAssertEqual((item as NSDictionary)[kSecAttrAccessible] as? String,
-                           kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
+                           kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
             return errSecDuplicateItem
         }))
     }
+    #endif
 }
 
 private final class BridgeProtocol: URLProtocol {

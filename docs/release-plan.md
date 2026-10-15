@@ -214,54 +214,56 @@ stream limit, including silent or trickling bodies. Pairing URLs are limited to
 2,048 UTF-8 bytes and the encoded Keychain item to 8 KiB on both save and load;
 oversized or insecure stored pairings do not start a request.
 
-### Open native gate: failed deletion and interrupted connection switches
+### Implemented source; open native gate: persistent connection selection
 
-The in-memory invalidation described above is not proof of persistent sign-out.
-`PairingStore.remove()` and `CloudSessionStore.remove()` currently discard
-`SecItemDelete` results. If deletion fails and the old item later becomes readable,
-Forget pairing can resume it on refresh, and cloud startup can reload the old
-session. A rejected/expired credential is not thereby proven valid. Successful
-remote revocation still prevents server authentication, but logout cannot rely on
-an unconfirmed remote response. Saving the destination credential before deleting
-the old one also leaves both items after process termination between those writes.
-Cloud-first startup and bridge fallback can then disagree with the last user choice.
-This is a conditional source-level finding, not a reproduced device exploit.
+The previous separate bridge/cloud items could disagree with the last user choice
+after failed deletion or termination between switch writes. Source now replaces
+them with one phone-private `WhenUnlockedThisDeviceOnly` Keychain union containing
+`signedOut`, `bridge` or `cloud`, its selected credential and cache generation.
+Transitions validate the destination, atomically advance the App Group generation,
+replace the union, install memory and only then clean up inactive bytes. No cache
+or Watch/widget payload contains this union. Renewal conditionally replaces the
+exact selected cloud credential without advancing its generation.
 
-Checked deletion must accept only `errSecSuccess` or `errSecItemNotFound`; another
-status must not produce a successful removal claim. That check alone does not make
-the two-item switch atomic. The proposed correction is a phone-private, device-only
-durable authority selection (`signedOut`, `bridge`, `cloud`), not credentials in
-preferences or shared caches. Cross-mode switches would save the destination,
-commit that selection, then clean up inactive credentials. Sign-out would commit
-`signedOut` before cleanup. Missing/unreadable selected credentials must not select
-the other mode. Cleanup failure must distinguish disconnected from locally erased.
-This proposal is not implemented or approved legacy-migration behavior: markerless
-existing installations need an explicit choice between reconnect-on-upgrade and
-bootstrapping the old cloud-first selection. The latter cannot distinguish a valid
-legacy connection from an earlier unsuccessful deletion.
+Missing, unreadable, malformed or generation-mismatched state never falls back to
+another credential or repairs a manifest from old authority. Legacy markerless
+installs intentionally **require reconnect on upgrade**; silent cloud-first import
+cannot distinguish a legitimate legacy login from a prior failed removal.
+Legacy deletion accepts only success/not-found; cleanup failure is reported
+separately from committed disconnection. A rejected cloud credential becomes
+signed out while sanitized observations remain; failed rejection attempts a new
+fence and blocks the process. If **no durable write succeeds**, persistent
+disconnection cannot be promised across restart; the UI reports it unconfirmed.
 
-Before closing this gate, exercise both switch directions and sign-out with delete
-success, not-found and failure; terminate/reconstruct after destination save,
-authority commit and cleanup. Observe the credential reaching actual transport,
-including zero authenticated sends after a committed sign-out. Include selector
-read/write failure, malformed/legacy state, failed replacement and late renewal or
-login completion. Preserve the existing usable-credential replacement guarantee.
-Injected Security statuses can test state transitions but cannot prove device
-Keychain accessibility or termination behavior; signed-device testing remains required.
+Portable Foundation contracts reconstruct storage after interrupted/failed
+commits, cover both switch directions and logout, reject late renewal, preserve
+old credential bytes on replacement failure and reject malformed/legacy state.
+The real bridge transport also checks authority at request admission; rejected
+admission does not start its URLProtocol. These are Linux/portable contracts, not
+real Security.framework or device process-kill tests. Native integration has not
+been built for this local revision. Before closing the gate, repeat on signed
+iPhone with actual Keychain success/not-found/failure, lock/restart and terminated
+switches, and observe the credential (or absence) reaching actual HTTPS transport.
 
-### Open native gate: failed cache invalidation
+### Implemented source; open native gate: failed cache invalidation
 
-`SnapshotStore.clear()` and `CloudCache.clear()` currently ignore file-removal
-errors. If an old readable cache survives a clear, phone startup can reload it;
-Watch activation or language sync can reconcile from that disk cache and replace
-the pending empty snapshot. This is a source-level failure sequence, not a
-device-reproduced disclosure, and is separate from retained OS-rendered content.
-Disk is authoritative only after successful owner invalidation. Before release,
-make clear failures observable and prevent old-owner cache reads/retransmission
-after a committed disconnect or switch, including across restart. Exercise a
-readable but undeletable cache, both account-switch directions, language sync and
-Watch activation. Existing missing-cache/normal-clear tests do not cover failed
-deletion; the durable invalidation behavior is not implemented or device-verified.
+Shared and phone-private cache filenames are generation-bound. Reads and writes
+check the current manifest before and after I/O; an old-owner completion cannot
+publish into the new namespace. Logout/switch advances the fence before authority
+replacement, so failed physical deletion does not reactivate readable old files.
+Watch sends reread gated phone disk instead of accepting arbitrary captured
+snapshots; activation and language sync use the same source. Watch reception
+advances its local generation and retries obsolete-file cleanup after successful
+storage, avoiding unbounded normal-update accumulation. Original observation
+timestamps are never replaced by generation changes or local persistence times.
+
+Non-root portable tests use real readable-but-undeletable files, verify exclusion
+after reconstruction, and retry cleanup without deleting current/foreign files.
+They also cover exact 256 KiB and oversized write/read boundaries. App Group file
+protection, Watch activation/language sync, WidgetKit reload, failed Keychain
+selection and offline devices still need native integration and signed-device
+testing. A committed logical fence is not secure disk erasure or an instantaneous
+removal of content already rendered by the OS or an offline Watch.
 
 ### Browser recovery boundary verified locally
 

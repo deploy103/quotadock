@@ -227,7 +227,9 @@ final class CloudSessionRenewalTests: XCTestCase {
             do {
                 _ = try await model.authorizedClient(fetchRenewal: { _ in data }, save: { next in
                     if next.pendingRenewal == nil {
-                        try CloudSessionStore.save(next, update: { _, _ in errSecInteractionNotAllowed },
+                        let bytes = try ConnectionRecord(generation: UUID(), mode: .cloud,
+                            credential: CloudSessionStore.encoded(next)).encoded()
+                        try ConnectionKeychain.write(bytes, update: { _, _ in errSecInteractionNotAllowed },
                             add: { _, _ in XCTFail("Replacement must not add"); return errSecSuccess })
                     }
                     stored = next
@@ -317,9 +319,7 @@ final class CloudSessionRenewalTests: XCTestCase {
         invalid.pendingRenewal = UUID()
         invalid.pendingRenewalStartedAt = Date()
         XCTAssertThrowsError(try invalid.validate())
-        XCTAssertThrowsError(try CloudSessionStore.save(invalid,
-            update: { _, _ in XCTFail("Incomplete record reached Keychain"); return errSecSuccess },
-            add: { _, _ in XCTFail("Incomplete record reached Keychain"); return errSecSuccess }))
+        XCTAssertThrowsError(try CloudSessionStore.encoded(invalid))
     }
 
     func testStrictResponseShapeAndFixedFamily() throws {

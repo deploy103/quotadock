@@ -36,11 +36,12 @@ final class WatchSync: NSObject, WCSessionDelegate {
         WCSession.default.delegate = self
         WCSession.default.activate()
     }
-    func send(_ snapshot: Snapshot) {
+    func send() {
         #if os(iOS)
         guard WCSession.isSupported() else { return }
         onMain {
-            self.transfer.enqueue(snapshot)
+            // Never relabel a captured pre-switch snapshot as current state.
+            self.transfer.reconcile(phoneSnapshot: SnapshotStore.load())
             self.flush(WCSession.default)
         }
         #endif
@@ -87,7 +88,7 @@ final class WatchSync: NSObject, WCSessionDelegate {
               let snapshot = try? Snapshot.decode(data) else { return }
         // WCSession callbacks are not main-thread callbacks. Do not announce a
         // new cache (or reload widgets) if persistence failed, e.g. before unlock.
-        do { try SnapshotStore.save(snapshot) } catch { return }
+        do { try SnapshotStore.replaceFromCompanion(snapshot) } catch { return }
         if let raw = applicationContext[DockL10n.languageKey] as? String,
            let language = DockLanguage(rawValue: raw) {
             DockL10n.save(language)

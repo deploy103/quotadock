@@ -18,6 +18,7 @@ targetTemplates:
   shared:
     sources:
       - Shared/Snapshot.swift
+      - Shared/CacheFiles.swift
       - Shared/SnapshotStore.swift
       - Shared/QuotaViews.swift
       - Shared/ProviderIcon.swift
@@ -123,7 +124,7 @@ targets:
   QuotaDockTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests]
+    sources: [Tests, PortableTests]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_PREFIX).tests

@@ -4,6 +4,19 @@ import Combine
 @testable import QuotaDock
 
 final class CloudPaginationTests: XCTestCase {
+    private var previousCacheBlock = false
+    override func setUp() {
+        super.setUp()
+        // These cases inject transport and sessions. Isolate their cache state
+        // from another case's deliberately failed persistent disconnection.
+        previousCacheBlock = SnapshotStore.blocked
+        SnapshotStore.blocked = false
+    }
+    override func tearDown() {
+        SnapshotStore.blocked = previousCacheBlock
+        super.tearDown()
+    }
+
     private var freeMetadata: Data {
         Data("""
         {"tier":"free","limits":{"accounts":3,"autoMinutes":120,"allowedAutoMinutes":[120],"earlyBatchesPerDay":10,"live":false},"autoMinutes":120,"earlyBatchesUsed":7,"liveSessionsUsed":0,"liveSessionsLimit":0,"purchasesAvailable":false}
