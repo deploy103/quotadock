@@ -33,13 +33,15 @@ export async function createBridge({ host = '127.0.0.1', token, getSnapshot, tls
     if (url === '/healthz') { reply(200, '{"ok":true}'); return; }
     if (url === '/v1/snapshot') {
       const address = req.socket.remoteAddress;
+      const auth = Buffer.from(req.headers.authorization || '');
+      const authorized = auth.length === secret.length && timingSafeEqual(auth, secret);
       const now = Date.now();
       if (buckets.size >= 2048) for (const [key, value] of buckets) if (now - value.at > 60000) buckets.delete(key);
       let bucket = buckets.get(address);
-      if (!bucket || now - bucket.at >= 60000) { bucket = { at: now, count: 0 }; if (buckets.size >= 2048) { reply(429, '{"error":"rate_limited"}'); return; } buckets.set(address, bucket); }
-      if (++bucket.count > 30) { reply(429, '{"error":"rate_limited"}'); return; }
-      const auth = Buffer.from(req.headers.authorization || '');
-      if (auth.length !== secret.length || !timingSafeEqual(auth, secret)) { reply(401, '{"error":"unauthorized"}'); return; }
+      if (!bucket || now - bucket.at >= 60000) { bucket = { at: now, authorized: 0, rejected: 0 }; if (buckets.size >= 2048) { reply(429, '{"error":"rate_limited"}'); return; } buckets.set(address, bucket); }
+      // Failed authentication must not spend a paired client's refresh allowance.
+      if (++bucket[authorized ? 'authorized' : 'rejected'] > 30) { reply(429, '{"error":"rate_limited"}'); return; }
+      if (!authorized) { reply(401, '{"error":"unauthorized"}'); return; }
       try {
         const body = JSON.stringify(await getSnapshot());
         if (Buffer.byteLength(body) > 262144) throw new Error('Oversized snapshot');

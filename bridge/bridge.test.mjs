@@ -59,8 +59,14 @@ test('HTTP contract requires bearer; rejects hostile origin/host, traversal, wri
   assert.equal((await fetch(`${base}/icons/grok.svg`)).status, 200);
   snapshot = { data: 'x'.repeat(262145) };
   assert.equal((await fetch(`${base}/v1/snapshot`, { headers: auth })).status, 503);
+  snapshot = demoSnapshot();
   let last;
   for (let i = 0; i < 31; i++) last = await fetch(`${base}/v1/snapshot`);
+  assert.equal(last.status, 429);
+  const afterAttack = await fetch(`${base}/v1/snapshot`, { headers: auth });
+  assert.equal(afterAttack.status, 200);
+  assert.deepEqual(await afterAttack.json(), snapshot);
+  for (let i = 0; i < 31; i++) last = await fetch(`${base}/v1/snapshot`, { headers: auth });
   assert.equal(last.status, 429);
   await assert.rejects(createBridge({ host: '0.0.0.0', token, getSnapshot: async () => snapshot }), /requires TLS/);
 });

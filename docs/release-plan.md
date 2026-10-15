@@ -249,6 +249,20 @@ login completion. Preserve the existing usable-credential replacement guarantee.
 Injected Security statuses can test state transitions but cannot prove device
 Keychain accessibility or termination behavior; signed-device testing remains required.
 
+### Open native gate: failed cache invalidation
+
+`SnapshotStore.clear()` and `CloudCache.clear()` currently ignore file-removal
+errors. If an old readable cache survives a clear, phone startup can reload it;
+Watch activation or language sync can reconcile from that disk cache and replace
+the pending empty snapshot. This is a source-level failure sequence, not a
+device-reproduced disclosure, and is separate from retained OS-rendered content.
+Disk is authoritative only after successful owner invalidation. Before release,
+make clear failures observable and prevent old-owner cache reads/retransmission
+after a committed disconnect or switch, including across restart. Exercise a
+readable but undeletable cache, both account-switch directions, language sync and
+Watch activation. Existing missing-cache/normal-clear tests do not cover failed
+deletion; the durable invalidation behavior is not implemented or device-verified.
+
 ### Browser recovery boundary verified locally
 
 The React bridge dashboard accepts HTTP 200 only. Fixed EN/KO recovery guidance
