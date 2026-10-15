@@ -36,13 +36,16 @@ stress probe found real English selector and Korean heading overflow; the public
 website fix and regression passed [website CI](https://github.com/quotadock-dev/quotadock-web/actions/runs/38664282127).
 This is not Safari zoom, physical-device text sizing or completed release acceptance.
 
-The later [connection/consent run](https://github.com/quotadock-dev/quotadock/actions/runs/38665613035)
-passed all 83 unit tests and both language-switch interaction flows, but failed the
-new consent interaction: its recorded tap hit the Form row's label, not the native
-switch. The local correction targets the child switch and checks both consent
-activation and withdrawal. That correction has not run on macOS; the latest native
-CI is therefore **not green**. Keep it a release gate rather than treating the
-earlier baseline as verification of the added case. Further publication is on hold.
+The [pushed connection/cache validation](https://github.com/quotadock-dev/quotadock/actions/runs/38728138540)
+passed all 96 native unit tests and all three simulator interaction flows, including
+separate initially-off cloud consents, activation and withdrawal. iPhone, Watch and
+WidgetKit builds passed. The previous cache failure reproduced with signing disabled:
+the host was not entitled to its App Group. Simulator-only ad-hoc signing restored
+that entitlement and the unchanged 5,000-slot/cache-retention test passed. This uses
+no Apple account or development certificate and does not verify physical-device
+provisioning, real Apple authentication or Watch delivery. Source is pushed to the
+existing PR branches; no merge or deployment is implied. Consult current PR checks
+for later revisions rather than treating historical results as current acceptance.
 
 On a signed iPhone, repeat fresh install and upgrade from an existing pairing in
 both languages and System mode. Interrupt each setup step, relaunch, switch language
@@ -240,8 +243,10 @@ commits, cover both switch directions and logout, reject late renewal, preserve
 old credential bytes on replacement failure and reject malformed/legacy state.
 The real bridge transport also checks authority at request admission; rejected
 admission does not start its URLProtocol. These are Linux/portable contracts, not
-real Security.framework or device process-kill tests. Native integration has not
-been built for this local revision. Before closing the gate, repeat on signed
+device process-kill tests. The pushed simulator run above compiled the native
+Security.framework adapters and passed injected adapter/cache/model contracts;
+it does not exercise real device lock or account authorization. Before closing
+the gate, repeat on signed
 iPhone with actual Keychain success/not-found/failure, lock/restart and terminated
 switches, and observe the credential (or absence) reaching actual HTTPS transport.
 

@@ -11,12 +11,17 @@ xcodegen generate
 open QuotaDock.xcodeproj
 # Pick an installed iPhone simulator (list with xcrun simctl list devices available).
 xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock \
-  -destination 'platform=iOS Simulator,name=iPhone 16' test CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,name=iPhone 16' test CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES
 xcodebuild -project QuotaDock.xcodeproj -target QuotaDockWatch \
   -sdk watchsimulator build CODE_SIGNING_ALLOWED=NO
 xcodebuild -project QuotaDock.xcodeproj -target QuotaDockWatchWidgets \
   -sdk watchsimulator build CODE_SIGNING_ALLOWED=NO
 ```
+
+The iPhone simulator tests use ad-hoc signing to retain App Group entitlements;
+disabling signing denies the host access to the shared cache. This uses no Apple
+account, development certificate or provisioning profile. The separate unsigned
+Watch commands check compilation only, not runtime entitlements or delivery.
 
 The dependency-free Foundation storage and bridge contracts also run with Swift
 5.9+ on Linux/macOS: `swift test --package-path apple`. Use a non-root account so
@@ -26,7 +31,7 @@ transport; they do **not** emulate Keychain, UIKit, WidgetKit or WatchConnectivi
 The latest local run used Swift 6.1.3 on Linux. Native integration still needs
 Xcode and signed-device verification; Linux success does not close those gates.
 
-Before physical-device builds, set `DEVELOPMENT_TEAM`, `BUNDLE_PREFIX`, and `APP_GROUP` in `project.yml` and regenerate. Defaults are `com.quotadock.app` and `group.com.quotadock.app`. Register the four bundle IDs (base, `.widgets`, `.watch`, `.watch.widgets`) and App Group with your team. Enable the group for all four targets. Enable **Sign In with Apple only for the main iOS App ID**, and configure the server's Apple audience to that exact bundle ID. Real sign-in requires the user's Apple Team/provisioning and reachable configured server; unsigned simulator CI only validates compilation, not authentication. The iPhone alone has separate `.bridge` and `.cloud` Keychain groups. Watch/widgets have **no token or Keychain entitlement**. App Groups are local to each device; WatchConnectivity bridges sanitized snapshots between devices.
+Before physical-device builds, set `DEVELOPMENT_TEAM`, `BUNDLE_PREFIX`, and `APP_GROUP` in `project.yml` and regenerate. Defaults are `com.quotadock.app` and `group.com.quotadock.app`. Register the four bundle IDs (base, `.widgets`, `.watch`, `.watch.widgets`) and App Group with your team. Enable the group for all four targets. Enable **Sign In with Apple only for the main iOS App ID**, and configure the server's Apple audience to that exact bundle ID. Real sign-in requires the user's Apple Team/provisioning and reachable configured server; simulator CI does not authenticate a real Apple account. The iPhone alone has separate `.bridge` and `.cloud` Keychain groups. Watch/widgets have **no token or Keychain entitlement**. App Groups are local to each device; WatchConnectivity bridges sanitized snapshots between devices.
 
 XcodeGen embeds the iOS widget and modern single-target Watch app into the iPhone app; the Watch app embeds its WidgetKit extension. Generated plists, entitlements and project are ignored. No ATS exceptions, background modes, push capability, or insecure certificate bypass are supplied. The shared iOS/watchOS app icon is an opaque 1024px rendering of `web/favicon.svg`. Release/App Store distribution additionally needs listing artwork, team provisioning and device/OS review.
 
@@ -160,6 +165,15 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 - `Tests/ContractTests.swift`: public model decode/encode, nullable values, clamps, staleness, demo, schema/date/size rejection, URL restrictions, request authorization and response sanitization/status tests using URLProtocol (no real credentials or server).
 - `PortableTests/`: restart/switch/logout and real file-permission failures plus URLProtocol bridge bounds/deadlines. Security-adapter tests remain iOS-only.
 - `UITests/OnboardingUITests.swift`: real simulator interaction for language changes, retained choices, cancel/relaunch and separate connection/consent screens. These tests do not perform provider login or Apple authorization.
+
+The [pushed connection/cache CI](https://github.com/quotadock-dev/quotadock/actions/runs/38728138540)
+passed 96 native unit tests, all three simulator interaction tests, iPhone/Watch/
+WidgetKit builds and the non-root portable storage/bridge job. The unchanged
+5,000-slot read and offline-cache-retention case failed when signing was disabled
+and passed with simulator-only ad-hoc signing. No production cache or authority
+guard was bypassed. This verifies simulator contracts, not physical-device file
+protection, real Apple authorization or Watch delivery; consult current PR checks
+for later revisions.
 
 The [2026-10-15 bilingual baseline](https://github.com/quotadock-dev/quotadock/actions/runs/38662891736)
 passed 83 native contracts, two English↔Korean interaction flows, iPhone/Watch/WidgetKit
