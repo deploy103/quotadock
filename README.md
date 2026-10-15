@@ -76,6 +76,8 @@ The feature-branch native source offers three resumable steps: **Welcome → Con
 
 Language switching never changes provider quota or performs new provider login. Installed widget language updates are OS-scheduled; Watch delivery is asynchronous. 언어 변경은 제공자 할당량이나 로그인을 바꾸지 않으며, 설치된 위젯 언어 갱신은 OS 일정에, Watch 전달은 비동기 연결에 따릅니다. This is feature-branch source, not `main` or deployed software; [native verification limits](apple/README.md#architecture-and-verification) still apply.
 
+The paired web dashboard remembers automatic/manual checks in browser-local storage for future page loads; other already-open tabs keep their current choice. Manual mode does not request usage on reload, a timer or visibility changes; Connect and Refresh remain explicit actions. Demo visits never overwrite this preference. Failed language or automatic-check saves keep the current-page choice and explain that it may reset on reopening. Pairing tokens still use tab-session storage, never browser-local storage. 웹 대시보드의 수동 확인 선택은 재접속에도 유지되며, 저장 실패는 한국어·영어로 안내합니다. 브라우저 저장소를 지우면 기본 설정으로 돌아갑니다.
+
 ## Optional cloud · credentials stay local
 
 The iPhone uses nonce-bound **Sign in with Apple**, without email/name scopes.

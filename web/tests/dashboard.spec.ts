@@ -88,11 +88,77 @@ test('60s checks, manual-only setting and keyboard focus', async ({ page }) => {
   await page.locator('#auto-refresh').uncheck(); await page.clock.fastForward(120000); expect(calls).toBe(2); await page.locator('#refresh').click(); await expect.poll(() => calls).toBe(3);
   await page.locator('#auto-refresh').focus(); await page.keyboard.press('Space'); await expect(page.locator('#auto-refresh')).toBeChecked(); await expect(page.locator('#auto-refresh')).toBeFocused();
 });
+test('manual checks survive reopening and demo visits without restoring automatic requests', async ({ page }) => {
+  await page.clock.install(); let calls = 0;
+  await page.route('**/v1/snapshot', route => { calls++; return route.fulfill({ json: snapshot() }); });
+  await page.goto('/'); await expect(page.locator('#auto-refresh')).toBeChecked();
+  await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await page.locator('#auto-refresh').uncheck();
+  await page.reload(); await expect(page.locator('#auto-refresh')).not.toBeChecked();
+  await expect(page.locator('#disconnect')).toBeVisible();
+  await expect(page.locator('#status')).toHaveText('수동 확인 · 새로고침을 눌러 주세요');
+  await expect(page.locator('.provider').first().locator('.badge')).toHaveText('관측 없음');
+  await expect(page.locator('.provider').first().locator('.unknown')).toHaveText('새로고침하여 남은 사용량을 확인하세요.');
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/manual-restored-ko.png', fullPage: true });
+  await page.clock.fastForward(120000);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'));
+  });
+  expect(calls).toBe(1); await expect(page.getByRole('progressbar')).toHaveCount(0);
+  await page.locator('#refresh').click(); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42'); expect(calls).toBe(2);
+  await page.goto('/?demo=1'); await expect(page.locator('#auto-refresh')).toBeDisabled();
+  await page.goto('/'); await expect(page.locator('#auto-refresh')).not.toBeChecked();
+  await page.clock.fastForward(120000); expect(calls).toBe(2);
+  await page.locator('header select').selectOption('en');
+  await expect(page.locator('#status')).toHaveText('Manual checks · Choose Refresh now');
+  await expect(page.locator('.provider').first().locator('.badge')).toHaveText('No observation');
+  await expect(page.locator('.provider').first().locator('.unknown')).toHaveText('Choose Refresh now to check remaining quota.');
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/manual-restored-en.png', fullPage: true });
+  await page.locator('#auto-refresh').check(); await page.reload();
+  await expect(page.locator('#auto-refresh')).toBeChecked();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42'); expect(calls).toBe(3);
+  await page.goto('/?demo=1'); await page.goto('/');
+  await expect(page.locator('#auto-refresh')).toBeChecked();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42'); expect(calls).toBe(4);
+  await page.clock.fastForward(60000); await expect.poll(() => calls).toBe(5);
+  expect(await page.evaluate(() => localStorage.getItem('quotadock.token'))).toBeNull();
+});
+test('an unsaved automatic-check choice remains effective and its warning survives requests and language changes', async ({ page }) => {
+  await page.clock.install(); let calls = 0;
+  await page.route('**/v1/snapshot', route => { calls++; return route.fulfill({ json: snapshot() }); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/'); await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  const restoreWrites = await page.evaluateHandle(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (this === localStorage && key === 'quotadock.auto-refresh') throw new DOMException('Denied', 'SecurityError');
+      return original.call(this, key, value);
+    };
+    return () => { Storage.prototype.setItem = original; };
+  });
+  await page.locator('#auto-refresh').uncheck(); await expect(page.locator('#auto-refresh')).toBeFocused();
+  await expect(page.locator('#auto-refresh-warning')).toContainText('자동 확인 설정을 저장하지 못했습니다.');
+  await page.clock.fastForward(120000); expect(calls).toBe(1);
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/auto-refresh-unsaved-ko.png', fullPage: true });
+  await page.locator('#refresh').click(); await expect.poll(() => calls).toBe(2);
+  await expect(page.locator('#auto-refresh-warning')).toBeVisible();
+  await page.locator('header select').selectOption('en');
+  await expect(page.locator('#auto-refresh-warning')).toHaveText('Could not save automatic-check settings. Your choice applies on this page; reopening it may restore the previous setting.');
+  await expect(page.locator('#auto-refresh')).not.toBeChecked();
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/auto-refresh-unsaved-en.png', fullPage: true });
+  await page.locator('#auto-refresh').check(); await page.locator('#auto-refresh').uncheck();
+  await expect(page.locator('#auto-refresh-warning')).toBeVisible();
+  await restoreWrites.evaluate(restore => restore());
+  await page.locator('#auto-refresh').check(); await expect(page.locator('#auto-refresh-warning')).toHaveCount(0);
+  await page.reload(); await expect(page.locator('#auto-refresh')).toBeChecked();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42'); expect(calls).toBe(3);
+});
 test('visibility cancels an active request; foreground auto resumes but manual does not', async ({ page }) => {
   let release: (() => void) | undefined, calls = 0;
   await page.route('**/v1/snapshot', async r => {
     calls++;
-    if (calls === 1) await new Promise<void>(resolve => { release = resolve; });
+    if (calls === 1 || calls === 3) await new Promise<void>(resolve => { release = resolve; });
     await r.fulfill({ json: snapshot() }).catch(() => {});
   });
   await page.goto('/'); await pair(page); await expect.poll(() => calls).toBe(1);
@@ -105,6 +171,20 @@ test('visibility cancels an active request; foreground auto resumes but manual d
   await page.locator('#auto-refresh').uncheck();
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   expect(calls).toBe(2);
+  const updated = await page.locator('#updated').textContent();
+  await page.locator('#refresh').click(); await expect.poll(() => calls).toBe(3);
+  await expect(page.locator('#status')).toHaveText('사용량 확인 중…');
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  release?.();
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(page.locator('#status')).toHaveText('확인 중단 · 다시 새로고침할 수 있습니다');
+  await expect(page.locator('#refresh')).toBeEnabled();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  expect(await page.locator('#updated').textContent()).toBe(updated); expect(calls).toBe(3);
+  await page.locator('header select').selectOption('en');
+  await expect(page.locator('#status')).toHaveText('Check stopped · You can refresh again');
+  await page.locator('#refresh').click(); await expect.poll(() => calls).toBe(4);
+  await expect(page.locator('#status')).toHaveText('Remaining quota checked');
 });
 test('15s deadline cancels stalled body and allows retry', async ({ page }) => {
   await page.clock.install(); await page.goto('/');

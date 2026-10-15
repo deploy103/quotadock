@@ -1,5 +1,51 @@
 import { test, expect } from '@playwright/test';
 test.use({ locale: 'en-US' });
+test('language save failure is announced without changing pairing, readings or the manual-check choice', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/v1/snapshot', route => {
+    calls++;
+    return route.fulfill({ json: { schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: '2026-01-01T00:00:00.000Z', windows: [{ label: 'Weekly', remainingPercent: 37.5, resetsAt: null }] }] } });
+  });
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/'); await page.locator('#token').fill('b'.repeat(64));
+  await page.locator('#connect-form button[type=submit]').click();
+  await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
+  await page.locator('#auto-refresh').uncheck();
+  const restoreWrites = await page.evaluateHandle(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (this === localStorage && key === 'quotadock.language') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return original.call(this, key, value);
+    };
+    return () => { Storage.prototype.setItem = original; };
+  });
+  const language = page.locator('header select'), feedback = page.locator('#language-save-status');
+  for (const choice of ['ko', 'en']) {
+    await language.focus(); await language.selectOption(choice); await expect(language).toBeFocused();
+    await expect(page.locator('html')).toHaveAttribute('lang', choice);
+    await expect(language).toHaveAttribute('aria-describedby', 'language-save-status');
+    await expect(feedback).toHaveText(choice === 'ko' ? '언어 설정을 저장하지 못했습니다. 새로고침하면 선택이 유지되지 않을 수 있습니다.' : 'Could not save your language. Your choice may reset on reload.');
+    await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
+    await expect(page.locator('#auto-refresh')).not.toBeChecked();
+    await expect(page.locator('#disconnect')).toBeVisible(); expect(calls).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/dashboard-language-unsaved-${choice}-320.png`, fullPage: true });
+  }
+  await page.evaluate(() => {
+    const sizes = [...document.querySelectorAll<HTMLElement>('body, body *')].map(element => ({ element, size: parseFloat(getComputedStyle(element).fontSize) }));
+    for (const { element, size } of sizes) element.style.fontSize = `${size * 2}px`;
+  });
+  for (const choice of ['ko', 'en']) {
+    await language.selectOption(choice); await expect(language).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/dashboard-language-unsaved-${choice}-320-double-text.png`, fullPage: true });
+  }
+  await restoreWrites.evaluate(restore => restore());
+  await language.selectOption('ko'); await expect(feedback).toBeEmpty();
+  await page.reload(); await expect(language).toHaveValue('ko');
+  await expect(page.locator('#auto-refresh')).not.toBeChecked();
+  await expect(page.locator('#disconnect')).toBeVisible(); expect(calls).toBe(1);
+});
 test('tabs share language without sharing pairing or refreshing quota', async ({ page, context }) => {
   const secret = 'b'.repeat(64);
   let calls = 0;
