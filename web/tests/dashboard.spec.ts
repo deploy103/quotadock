@@ -5,14 +5,21 @@ import { readFile } from 'node:fs/promises';
 const secret = 'a'.repeat(64);
 test.use({ locale: 'ko-KR' });
 const snapshot = () => ({ schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: new Date().toISOString(), windows: [{ label: 'Session', remainingPercent: 42, resetsAt: null }] }] });
-async function pair(page: Page) { await page.locator('#token').fill(secret); await page.getByRole('button', { name: '연결하기' }).click(); }
+async function pair(page: Page) {
+  if (!await page.locator('#token').isVisible()) await page.locator('#settings-toggle').click();
+  await page.locator('#token').fill(secret); await page.getByRole('button', { name: '연결하기' }).click();
+}
 test('safe bearer pairing; malformed, oversized and rejected fetch retains original cache; disconnect focus', async ({ page }) => {
   let body: unknown = snapshot(), rejected = false;
   await page.route('**/v1/snapshot', async route => {
     expect(route.request().url()).toBe('http://127.0.0.1:4317/v1/snapshot'); expect(route.request().headers().authorization).toBe(`Bearer ${secret}`);
     if (rejected) await route.abort(); else await route.fulfill({ json: body });
   });
-  await page.goto('/'); await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await page.goto('/'); await expect(page.locator('#endpoint')).toBeHidden();
+  await page.locator('#settings-toggle').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('#endpoint')).toBeFocused();
+  await pair(page); await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
+  await expect(page.locator('#endpoint')).toBeHidden(); await expect(page.locator('#settings-toggle')).toBeFocused();
   const updated = await page.locator('#updated').textContent(); await expect(page.locator('#token')).toHaveValue('');
   expect(await page.evaluate(() => sessionStorage.getItem('quotadock.token'))).toBe(secret); expect(await page.evaluate(() => localStorage.length)).toBe(0);
   for (const invalid of [{}, { ...snapshot(), providers: [snapshot().providers[0], snapshot().providers[0]] }, { ...snapshot(), generatedAt: '2026-02-30T00:00:00.000Z' }, '가'.repeat(90000)]) {
@@ -30,14 +37,15 @@ test('HTTP failures give fixed bilingual recovery actions without exposing bodie
   await page.locator('#auto-refresh').uncheck();
   const observed = await page.locator('#updated').textContent();
   const cases = [
-    { code: 401, ko: '브리지가 페어링을 거부했습니다. 토큰을 확인한 뒤 다시 연결해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge rejected pairing. Check the token and connect again. Existing observations are retained.' },
-    { code: 403, ko: '브리지의 접근 정책이 요청을 거부했습니다. 허용된 주소와 접근 설정을 확인해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge access policy refused this request. Check the allowed address and access settings. Existing observations are retained.' },
-    { code: 429, ko: '브리지 요청이 너무 많습니다. 잠시 기다린 뒤 다시 확인해 주세요. 기존 관측값은 유지합니다.', en: 'Too many bridge requests. Wait before checking again. Existing observations are retained.' },
-    { code: 503, ko: '브리지에서 사용량을 가져오지 못했습니다. 로컬 수집기와 CodexBar 상태를 확인한 뒤 다시 시도해 주세요. 기존 관측값은 유지합니다.', en: 'The bridge could not retrieve usage. Check the local collector and CodexBar before retrying. Existing observations are retained.' },
+    { code: 401, ko: '페어링이 거부됐습니다. 토큰을 확인해 주세요.', en: 'Pairing refused. Check your token.' },
+    { code: 403, ko: '브리지 접근이 차단됐습니다. 접근 설정을 확인해 주세요.', en: 'Bridge access blocked. Check access settings.' },
+    { code: 429, ko: '요청이 많습니다. 잠시 후 다시 확인해 주세요.', en: 'Too many requests. Try again shortly.' },
+    { code: 503, ko: '사용량 수집에 실패했습니다. 로컬 수집기를 확인해 주세요.', en: 'Could not collect usage. Check your local collector.' },
   ];
   for (const scenario of cases) {
     status = scenario.code; await page.locator('#refresh').click();
     await expect(page.locator('#connection-message')).toHaveText(scenario.ko);
+    await expect(page.locator('#connection-message')).toBeVisible(); await expect(page.locator('#endpoint')).toBeHidden();
     await expect(page.locator('#status')).toContainText('연결 오류');
     expect(await page.locator('#updated').textContent()).toBe(observed);
     await page.locator('header select').selectOption('en');
@@ -52,7 +60,7 @@ test('HTTP failures give fixed bilingual recovery actions without exposing bodie
   }
   for (status of [201, 500]) {
     await page.locator('#refresh').click(); await expect(page.locator('#status')).toContainText('연결 오류');
-    await expect(page.locator('#connection-message')).toContainText('주소, 토큰, HTTPS 인증서');
+    await expect(page.locator('#connection-message')).toContainText('주소, 토큰과 HTTPS 설정');
     await expect(page.getByRole('progressbar')).toHaveAttribute('value', '42');
   }
   status = 200; await page.locator('#refresh').click();
@@ -80,7 +88,7 @@ test('an endless HTTP error body stops downloading when recovery is shown', asyn
   try {
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing test listener');
     await page.goto(`http://127.0.0.1:${address.port}`); await pair(page);
-    await expect(page.locator('#connection-message')).toContainText('브리지의 접근 정책이 요청을 거부했습니다.');
+    await expect(page.locator('#connection-message')).toContainText('브리지 접근이 차단됐습니다.');
     await expect(page.locator('#refresh')).toBeEnabled();
     await expect.poll(() => closed, { timeout: 3000 }).toBe(true);
     await expect(page.locator('body')).not.toContainText('private diagnostic');
@@ -133,8 +141,10 @@ test('memory-only pairing warning survives reads and language changes until disc
 });
 test('cross-origin, userinfo, path, query and fragment rejected before bearer sends', async ({ page }) => {
   let calls = 0; page.on('request', r => { if (r.headers().authorization) calls++; }); await page.goto('/');
+  await page.locator('#settings-toggle').click();
   for (const endpoint of ['https://other.invalid', 'http://other.invalid', 'http://user@127.0.0.1:4317', 'http://127.0.0.1:4317/path', 'http://127.0.0.1:4317/?q=1', 'http://127.0.0.1:4317/#x']) {
-    await page.locator('#endpoint').fill(endpoint); await pair(page); await expect(page.locator('#connection-message')).toContainText('같은 브리지');
+    await page.locator('#endpoint').fill(endpoint); await pair(page); await expect(page.locator('#pairing-message')).toContainText('같은 브리지');
+    await expect(page.locator('#pairing-message')).toBeVisible(); await expect(page.locator('#endpoint')).toBeVisible();
   } expect(calls).toBe(0);
 });
 test('stale/unknown and private vocabulary never become measured zero', async ({ page }) => {
@@ -270,8 +280,18 @@ test('built serving refuses sources and arbitrary paths with unchanged CSP', asy
 test('demo desktop/mobile appearance, icons and unknown Grok', async ({ page }) => {
   await page.goto('/?demo=1'); await expect(page.locator('#mode')).toContainText('DEMO'); await expect(page.getByRole('progressbar')).toHaveCount(6); await expect(page.locator('.provider').last().getByRole('progressbar')).toHaveCount(0); await expect(page.locator('#auto-refresh')).toBeDisabled();
   expect(await page.locator('.provider-icon').evaluateAll(images => images.every(img => img instanceof HTMLImageElement && img.naturalWidth > 0))).toBe(true);
+  const codexGuide = page.getByText('Codex 허용량 · 전체 ChatGPT 사용량 아님. Free 지원은 화면·롤아웃에 따라 다르며 측정 불가는 알 수 없음입니다.', { exact: true });
+  await expect(codexGuide).toBeHidden();
+  await page.getByText('Codex 안내', { exact: true }).focus(); await page.keyboard.press('Enter');
+  await expect(codexGuide).toBeVisible(); await expect(page.getByRole('progressbar')).toHaveCount(6);
+  await page.keyboard.press('Enter'); await expect(codexGuide).toBeHidden();
   if (process.env.CAPTURE_DASHBOARD) {
     await page.setViewportSize({ width: 1440, height: 1100 }); await page.screenshot({ path: '.amp/in/artifacts/dashboard-desktop.png', fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: '.amp/in/artifacts/dashboard-mobile.png', fullPage: true });
-  } expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.getByRole('progressbar').evaluateAll(bars => bars.map(bar => (bar as HTMLProgressElement).value))).toEqual([72, 91, 84, 63, 88, 96]);
+  if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/dashboard-demo-ko-320-root-200.png', fullPage: true });
 });

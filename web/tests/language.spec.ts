@@ -7,7 +7,7 @@ test('language save failure is announced without changing pairing, readings or t
     return route.fulfill({ json: { schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: '2026-01-01T00:00:00.000Z', windows: [{ label: 'Weekly', remainingPercent: 37.5, resetsAt: null }] }] } });
   });
   await page.setViewportSize({ width: 320, height: 844 });
-  await page.goto('/'); await page.locator('#token').fill('b'.repeat(64));
+  await page.goto('/'); await page.locator('#settings-toggle').click(); await page.locator('#token').fill('b'.repeat(64));
   await page.locator('#connect-form button[type=submit]').click();
   await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
   await page.locator('#auto-refresh').uncheck();
@@ -55,6 +55,7 @@ test('tabs share language without sharing pairing or refreshing quota', async ({
     return route.fulfill({ json: { schemaVersion: 1, demo: false, generatedAt: '2026-01-01T00:00:00.000Z', providers: [{ id: 'claude', plan: 'Max', source: 'codexbar', state: 'available', observedAt: '2026-01-01T00:00:00.000Z', windows: [{ label: 'Weekly', remainingPercent: 37.5, resetsAt: null }] }] } });
   });
   await page.goto('/');
+  await page.locator('#settings-toggle').click();
   await page.locator('#token').fill(secret);
   await page.locator('#connect-form button[type=submit]').click();
   await expect(page.getByRole('progressbar')).toHaveAttribute('value', '37.5');
@@ -91,6 +92,7 @@ for (const width of [390, 1440]) test(`language preserves pairing and readings a
   });
   await page.goto('/'); const language = page.locator('header select');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.locator('#token')).toBeHidden(); await page.locator('#settings-toggle').click();
   await expect(page.getByRole('heading', { name: 'Connecting for the first time?' })).toBeVisible();
   if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: `.amp/in/artifacts/dashboard-en-guide-${width}.png`, fullPage: true });
   await page.locator('#token').fill(secret); await language.focus(); await language.selectOption('ko'); await expect(language).toBeFocused();
