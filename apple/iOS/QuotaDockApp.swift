@@ -178,11 +178,13 @@ struct DockView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    NavigationLink(setupText("Optional cloud account")) { CloudView(model: model.cloud) }
                     if model.demo || model.snapshot?.demo == true {
-                        Text(setupText("DEMO · sample data, not your account")).font(.headline).foregroundStyle(DockTheme.mint)
+                        Text(setupText("DEMO · sample data, not your account"))
+                            .font(.subheadline).fontWeight(.semibold).foregroundStyle(DockTheme.mint)
                     }
-                    Text(DockL10n.text(DockL10n.text(model.status, table: "Setup"))).font(.caption).foregroundStyle(.secondary)
+                    Text(DockL10n.text(DockL10n.text(model.status, table: "Setup")))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if model.cloud.session != nil && !model.demo {
                         CloudReadingsView(model: model.cloud)
                     } else if let snapshot = model.snapshot {
@@ -190,8 +192,13 @@ struct DockView: View {
                     } else {
                         ContentUnavailableView(setupText("No readings yet"), systemImage: "chart.bar", description: Text(setupText("Pair a bridge to see remaining allowances.")))
                     }
-                    Text(setupText("Bars show remaining allowance, never a sum. Reset times are informational. Widgets update when the OS allows; Watch uses the last iPhone transfer."))
-                        .font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup {
+                        Text(setupText("Bars show remaining allowance, never a sum. Reset times are informational. Widgets update when the OS allows; Watch uses the last iPhone transfer."))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } label: {
+                        Text(DockL10n.text("About these readings")).font(.subheadline)
+                    }
                     Button(setupText(model.demo ? "Leave demo" : "Explore demo")) {
                         model.demo.toggle()
                         model.snapshot = model.demo ? .preview : SnapshotStore.load()
@@ -200,12 +207,18 @@ struct DockView: View {
                 }.padding()
             }.background(DockTheme.background)
                 .navigationTitle("QuotaDock")
+                .navigationBarTitleDisplayMode(.inline)
                 .refreshable { await model.refresh() }
                 .toolbar {
-                    Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
-                    Button(setupText("Pair"), systemImage: "link") { showPairing = true }
                     Button(setupText("Refresh"), systemImage: "arrow.clockwise") { Task { await model.refresh() } }
                         .disabled(model.busy || model.demo)
+                    Menu {
+                        Button(setupText("Pair"), systemImage: "link") { showPairing = true }
+                        NavigationLink(setupText("Optional cloud account")) { CloudView(model: model.cloud) }
+                    } label: {
+                        Label(DockL10n.text("Connections"), systemImage: "link")
+                    }
+                    Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
                 }
                 .sheet(isPresented: $showPairing) { PairingView(model: model) }
                 .sheet(isPresented: $showSettings, onDismiss: {

@@ -1,4 +1,6 @@
 /* Native quota presentation. Provider names, plan IDs and UUIDs remain canonical. */
+"About these readings" = "관측값 안내";
+"Connections" = "연결";
 "Session" = "세션";
 "Weekly" = "주간";
 "Daily" = "일간";

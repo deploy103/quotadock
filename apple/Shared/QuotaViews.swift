@@ -69,7 +69,12 @@ struct RemainingBar: View {
                         stackedLabel
                     }
                 }
-            }.font(.caption)
+            }
+            #if os(iOS)
+            .font(.subheadline)
+            #else
+            .font(.caption)
+            #endif
             if let remaining = window.clampedRemaining {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
@@ -80,7 +85,7 @@ struct RemainingBar: View {
             }
             if let reset = window.resetsAt {
                 Text(DockL10n.format("Reset: %@", DockL10n.date(reset)))
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -116,7 +121,7 @@ struct ProviderCard: View {
             Text(provider.plan.map { DockL10n.format("Plan: %@", $0) } ?? DockL10n.text("Plan unknown"))
                 .font(.subheadline).foregroundStyle(.secondary)
             if provider.id == .codex {
-                Text(DockL10n.text("Codex allowance · not total ChatGPT usage")).font(.caption2).foregroundStyle(.secondary)
+                Text(DockL10n.text("Codex allowance · not total ChatGPT usage")).font(.caption).foregroundStyle(.secondary)
             }
             if provider.state != .available { Text(DockL10n.text("Usage unavailable")).foregroundStyle(.secondary) }
             if provider.isStale() {
@@ -126,7 +131,8 @@ struct ProviderCard: View {
             ForEach(provider.displayWindows) { RemainingBar(window: $0) }
             if provider.windows.isEmpty { Text(DockL10n.text("Remaining unknown")).font(.caption) }
             if let observed = provider.observedAt {
-                Text(DockL10n.format("Observed %@", DockL10n.date(observed))).font(.caption2).foregroundStyle(.secondary)
+                Text(DockL10n.format("Observed %@", DockL10n.date(observed))).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
             .fixedSize(horizontal: false, vertical: true)

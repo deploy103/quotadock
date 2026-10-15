@@ -1,4 +1,6 @@
 /* Native quota presentation. English source strings are stable localization keys. */
+"About these readings" = "About these readings";
+"Connections" = "Connections";
 "Session" = "Session";
 "Weekly" = "Weekly";
 "Daily" = "Daily";
