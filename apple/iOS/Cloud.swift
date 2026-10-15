@@ -902,7 +902,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
         let task = Task { @MainActor () async throws -> CloudClient in
             try Task.checkCancellation()
             guard self.foreground, self.revision == current else { throw CancellationError() }
-            func persist(_ next: CloudSession) throws {
+            @MainActor func persist(_ next: CloudSession) throws {
                 guard let previous = self.session else { throw CancellationError() }
                 if let save { try save(next) }
                 else { try ConnectionStore.renew(next, replacing: previous, generation: generation) }
