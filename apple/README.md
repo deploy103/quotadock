@@ -22,11 +22,31 @@ Before physical-device builds, set `DEVELOPMENT_TEAM`, `BUNDLE_PREFIX`, and `APP
 
 XcodeGen embeds the iOS widget and modern single-target Watch app into the iPhone app; the Watch app embeds its WidgetKit extension. Generated plists, entitlements and project are ignored. No ATS exceptions, background modes, push capability, or insecure certificate bypass are supplied. The shared iOS/watchOS app icon is an opaque 1024px rendering of `web/favicon.svg`. Release/App Store distribution additionally needs listing artwork, team provisioning and device/OS review.
 
+## First-run setup · 첫 실행 설정
+
+These instructions describe feature-branch source, not `main` or a deployed release.
+
+1. **Welcome:** choose **Use device language**, **English**, or **한국어**. Device language uses the first supported English/Korean preference, falling back to English.
+2. **Connection:** explicitly select **Explore demo**, **Pair my own bridge**, **Optional cloud account**, or **Connect later** before continuing. Demo is in-memory sample data, never saved live observations or fabricated Watch transfers. Bridge needs your private trusted HTTPS URL and pairing token, not a provider password. Cloud opens a separate connection screen; Later opens the dashboard without deleting existing connections/cache. Selecting a route alone does not connect or sign in.
+3. **Preferences:** **Refresh when I open the app** defaults on; turn it off for refresh-button/pull-only operation. This is separate from collector background collection. Finish setup to apply the refresh choice. The welcome-screen demo shortcut selects demo and jumps to this step.
+
+Interrupted first-run progress resumes locally if saving succeeds. Use **Settings → Review setup** to revisit, or **Cancel** to discard that revisit's route/refresh draft; language changes apply immediately and are not rolled back. Language can also be changed in Settings. Switching language never changes provider quota or performs a new provider login. Installed widget language updates are OS-scheduled; Watch language delivery is asynchronous, not instantaneous.
+
+Cloud selection is **not consent**: on its separate screen, review the server and explicitly enable both initially-off consents (quota/account-metadata storage and local collector processing) before Sign in with Apple. Setup itself requests no provider login, payment or system permission.
+
+1. **시작:** **기기 언어 사용**, **English**, **한국어** 중 선택하세요. 기기 언어는 선호 언어 중 지원되는 영어·한국어를 사용하며, 없으면 영어로 표시합니다.
+2. **연결:** **데모 살펴보기**, **내 브리지 연결**, **클라우드 계정 (선택 사항)**, **나중에 연결** 중 하나를 직접 선택해야 계속할 수 있습니다. 데모는 메모리 안의 예시이며 실제 캐시를 덮어쓰거나 Watch에 가짜 관측을 보내지 않습니다. 브리지에는 사설 HTTPS 주소와 페어링 토큰을 입력하며 제공자 비밀번호는 입력하지 않습니다. 클라우드는 별도 연결 화면을 열고, 나중에 연결은 기존 연결·캐시를 지우지 않고 대시보드를 엽니다. 경로 선택만으로 연결·로그인되지 않습니다.
+3. **환경설정:** **앱을 열 때 새로고침**은 기본으로 켜져 있습니다. 끄면 버튼이나 당겨서 수동 새로고침하세요. 수집기의 백그라운드 수집 설정과는 별개이며, 설정 완료 시 적용됩니다. 시작 화면의 데모 바로가기는 데모를 선택하고 이 단계로 이동합니다.
+
+저장에 성공한 첫 실행 진행 상황은 중단 후 이어집니다. **설정 → 초기 설정 다시 보기**에서 다시 열고 **취소**하면 재설정 중의 연결·새로고침 초안을 버립니다. 언어는 즉시 적용되므로 취소해도 되돌아가지 않으며 설정에서도 바꿀 수 있습니다. 언어 변경은 제공자 할당량을 바꾸거나 새 제공자 로그인을 수행하지 않습니다. 설치된 위젯의 언어 갱신은 OS 일정에 따르고 Watch 전달은 비동기입니다.
+
+클라우드 경로 선택은 **동의가 아닙니다**. 별도 화면에서 서버를 확인하고, 기본으로 꺼진 사용량·계정 메타데이터 저장 동의와 로컬 수집기 처리 동의를 각각 켠 뒤 Apple로 로그인하세요. 초기 설정 자체는 제공자 로그인·결제·시스템 권한을 요청하지 않습니다.
+
 ## Pair and use
 
 Run the bridge behind a trusted, device-reachable HTTPS endpoint (valid TLS certificate), then enter its **base URL** and pairing bearer token in Pair. `/v1/snapshot` is appended. Never enter Claude/OpenAI/other provider credentials. URL and token are held together in device-only, after-first-unlock Keychain; no token goes to UserDefaults, snapshot cache, logs or Watch. Redirects are refused to prevent bearer forwarding. Plain HTTP, URL credentials, queries and fragments are rejected. Forget pairing removes the local token/cache; Watch can retain its old snapshot until a new transfer, and offline widgets can retain OS-rendered content.
 
-iPhone fetches on foreground activation and manual/pull refresh. The bridge may return cached measurements. **All widgets are cache-only timeline readers**, never background bridge/provider/cloud clients. They have neither network client source nor Keychain entitlements. Timeline requests are hints, not guaranteed refresh intervals. Add the **All AI allowances** overview or individual provider widgets to **Home Screen or Today View**, or rectangular/circular/inline widgets on the Lock Screen. Overview shows four providers with icons, freshness and the first window; individual medium widgets show up to two windows plus the plan, while smaller surfaces show the first window. Open the app for every window and reset time. Watch Smart Stack widgets and complications use only the local cache. Open both paired apps and refresh iPhone to initiate WatchConnectivity transfer; no instantaneous/push update promise.
+iPhone fetches on foreground activation when refresh-on-open is enabled, and on manual/pull refresh. The bridge may return cached measurements. **All widgets are cache-only timeline readers**, never background bridge/provider/cloud clients. They have neither network client source nor Keychain entitlements. Timeline requests are hints, not guaranteed refresh intervals. Add the **All AI allowances** overview or individual provider widgets to **Home Screen or Today View**, or rectangular/circular/inline widgets on the Lock Screen. Overview shows four providers with icons, freshness and the first window; individual medium widgets show up to two windows plus the plan, while smaller surfaces show the first window. Open the app for every window and reset time. Watch Smart Stack widgets and complications use only the local cache. Open both paired apps and refresh iPhone to initiate WatchConnectivity transfer; no instantaneous/push update promise.
 
 ## Optional cloud (v2, server-verified tiers; pilot purchases closed)
 
@@ -114,12 +134,29 @@ Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is
 - `Shared/SnapshotStore.swift`: atomic sanitized JSON App Group cache.
 - `Shared/WatchSync.swift`: latest application-context transfer, no secrets, Watch cache/timeline reload.
 - `Shared/QuotaViews.swift`: reusable remaining bars/provider cards.
+- `Shared/Localization.swift` and `Resources/`: allowlisted English/Korean presentation, shared language preference and canonical model values.
+- `iOS/FirstRun.swift`: locally resumable setup, explicit route selection and separate session-only/persisted refresh choices.
 - `iOS/Cloud.swift`: real nonce-bound Apple/server authorization, independent Keychain session, v2 account-list decoding, sandbox full-slot cache, foreground collector-job requests and bounded job-ID polling.
 - `iOS/Purchases.swift`: StoreKit product loading, UUID-bound purchase/restore, update recovery and server-accepted delivery. No client-side entitlement assignment.
 - `iOS/`, `Watch/`, `Widgets/`: small native surfaces and timeline adapters.
 - `Tests/ContractTests.swift`: public model decode/encode, nullable values, clamps, staleness, demo, schema/date/size rejection, URL restrictions, request authorization and response sanitization/status tests using URLProtocol (no real credentials or server).
+- `UITests/OnboardingUITests.swift`: real simulator interaction for language changes, retained choices, cancel/relaunch and separate connection/consent screens. These tests do not perform provider login or Apple authorization.
 
-Post-noon [2026-10-14 CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
+The [2026-10-15 bilingual baseline](https://github.com/quotadock-dev/quotadock/actions/runs/38662891736)
+passed 83 native contracts, two English↔Korean interaction flows, iPhone/Watch/WidgetKit
+builds, 22 bridge contracts, 14 React browser contracts and 10 imported skill tests;
+the root-only bridge control skipped on the nonroot CI runner. Sixteen interaction
+captures and 31 demo captures were exported. English/Korean welcome, connection,
+preferences and dashboard captures, Korean settings/cloud/widget hosts and large
+Dynamic Type were inspected. Text below the scroll boundary is not all visible in
+one capture. This baseline predates the additional bridge/cloud-route interaction
+case; consult the PR's checks for the exact current revision.
+
+Physical iPhone/Watch behavior, Apple authentication/purchases, provisioning and
+deployment remain unverified for this feature-branch source. Widget/Watch galleries
+are shared-component hosts, not proof of system-widget layout or Watch delivery.
+
+Historical post-noon [2026-10-14 CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
 passed **73 native tests**, iPhone/Watch/WidgetKit builds, **30 Node 22 tests**
 and **10 imported skill tests**. The single root-only service test was skipped
 under the CI runner's nonroot user; a separate disposable Node 22 root control

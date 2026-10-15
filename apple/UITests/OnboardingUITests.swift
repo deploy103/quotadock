@@ -19,6 +19,46 @@ final class OnboardingUITests: XCTestCase {
         exerciseFirstRun(startKorean: true)
     }
 
+    func testSetupOpensPairingAndSeparateUnacceptedCloudConsent() {
+        app.launchArguments = ["--demo", "--reset-setup-test", "--language-en-preview"]
+        app.launch()
+        tap(app.buttons["setup-continue"])
+        tap(app.buttons["setup-route-bridge"])
+        tap(app.buttons["setup-continue"])
+        let refresh = app.switches["setup-foreground-refresh"]
+        reveal(refresh)
+        refresh.tap()
+        XCTAssertEqual(refresh.value as? String, "0")
+        tap(app.buttons["setup-continue"])
+        XCTAssertTrue(app.navigationBars["Pair bridge"].waitForExistence(timeout: 5))
+        let token = app.secureTextFields["Pairing token"]
+        XCTAssertTrue(token.exists)
+        capture("EN-setup-bridge")
+        tap(app.buttons["Cancel"])
+        openSettings(korean: false)
+        tap(app.buttons["Review setup"])
+        tap(app.buttons["setup-continue"])
+        tap(app.buttons["setup-route-cloud"])
+        tap(app.buttons["setup-continue"])
+        reveal(refresh)
+        XCTAssertEqual(refresh.value as? String, "0")
+        tap(app.buttons["setup-continue"])
+        XCTAssertTrue(app.navigationBars["Optional cloud"].waitForExistence(timeout: 5))
+        let storage = app.switches["Store sanitized quota and account metadata"]
+        let collector = app.switches["Allow local collector quota processing"]
+        reveal(storage)
+        XCTAssertEqual(storage.value as? String, "0", "Choosing cloud in setup is not storage consent")
+        reveal(collector)
+        XCTAssertEqual(collector.value as? String, "0", "Choosing cloud in setup is not collector consent")
+        let connect = app.buttons["Connect with Apple"]
+        reveal(connect)
+        XCTAssertFalse(connect.isEnabled)
+        tap(storage)
+        XCTAssertEqual(storage.value as? String, "1")
+        XCTAssertFalse(connect.isEnabled, "One consent cannot authorize Apple sign-in")
+        capture("EN-setup-cloud-consent")
+    }
+
     private func exerciseFirstRun(startKorean: Bool) {
         app.launchArguments = ["--demo", "--reset-setup-test",
                                startKorean ? "--language-ko-preview" : "--language-en-preview"]

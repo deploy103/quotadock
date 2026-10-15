@@ -5,6 +5,8 @@ imply a signed binary release or App Store availability.
 
 ## 0.1.0 — Source preview
 
+- English/Korean interfaces with device-language fallback; language changes retain measurements and connection state.
+- Resumable native setup with explicit demo/private bridge/optional cloud/later choice, refresh-on-open or manual refresh, and Settings revisit/cancel. Cloud consent remains separate; demo stays in memory.
 - Local-first, zero-dependency Node.js 22 bridge around an installed CodexBar CLI.
 - Authenticated v1 snapshots with explicit unknown, unavailable, demo, and stale semantics.
 - Source clients for a web dashboard, iPhone, widgets, and Apple Watch.

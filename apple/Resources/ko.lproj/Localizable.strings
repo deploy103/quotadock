@@ -65,7 +65,7 @@
 "Cached first account per provider. Open QuotaDock for all accounts and windows." = "제공업체별 캐시된 첫 계정입니다. 모든 계정과 구간은 QuotaDock에서 확인하세요.";
 "All AI allowances" = "모든 AI 할당량";
 "First quota window per provider. Codex is not total ChatGPT usage. Open the app for all windows and reset times." = "제공업체별 첫 할당량 구간입니다. Codex는 전체 ChatGPT 사용량이 아닙니다. 모든 구간과 초기화 시각은 앱에서 확인하세요.";
-"%@ · %@ slots · auto %d min · early %@ · Live %d/%d %@" = "%@ · 슬롯 %@개 · 자동 %d분 · 조기 %@ · Live %d/%d %@";
+"%@ · %@ slots · auto %d min · early %@ · Live %d/%d %@" = "%@ · 슬롯 %@ · 자동 %d분 · 조기 %@ · Live %d/%d %@";
 "Free" = "무료";
 "unlimited" = "무제한";
 "%d/%d per KST day" = "%d/%d (한국 시간 하루 기준)";

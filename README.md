@@ -68,6 +68,14 @@ Unknown values stay unknown (`null`), never synthetic zero. Only a measured zero
 
 OpenAI's [current Codex plan guide](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan) includes Free/Go, while its [pricing guide](https://learn.chatgpt.com/docs/pricing) notes surface/rollout restrictions. **Free is not automatically rejected.** Missing account eligibility or an unmeasurable quota remains Unknown; this app cannot infer eligibility from a failed lookup. Checked 2026-10-13; no real Free account test was performed.
 
+## First run · 첫 실행
+
+The feature-branch native source offers three resumable steps: **Welcome → Connection → Preferences**. Choose device language, English or 한국어; explicitly select in-memory **demo**, your **private HTTPS bridge**, **optional cloud**, or **connect later** before continuing. Refresh-on-open defaults on; turn it off for button/pull refresh. Settings lets you change language or review setup; Cancel discards a revisit's connection/refresh draft, not an immediately applied language change. Cloud still requires separate explicit consents and Apple authorization, not merely a setup selection. See [bilingual native instructions](apple/README.md#first-run-setup--첫-실행-설정).
+
+네이티브 기능 브랜치의 첫 실행은 **시작 → 연결 → 환경설정** 3단계이며 저장된 진행을 이어갑니다. 기기 언어·English·한국어를 선택하고 **메모리 내 데모 / 사설 HTTPS 브리지 / 선택적 클라우드 / 나중에 연결** 중 하나를 직접 선택하세요. 앱을 열 때 새로고침은 기본으로 켜져 있으며 끄면 버튼·당기기로 갱신합니다. 설정에서 언어 변경·설정 다시 보기가 가능하며, 취소는 재설정 중의 연결·새로고침 초안만 버립니다. 클라우드는 별도 명시적 동의와 Apple 인증이 필요합니다.
+
+Language switching never changes provider quota or performs new provider login. Installed widget language updates are OS-scheduled; Watch delivery is asynchronous. 언어 변경은 제공자 할당량이나 로그인을 바꾸지 않으며, 설치된 위젯 언어 갱신은 OS 일정에, Watch 전달은 비동기 연결에 따릅니다. This is feature-branch source, not `main` or deployed software; [native verification limits](apple/README.md#architecture-and-verification) still apply.
+
 ## Optional cloud · credentials stay local
 
 The iPhone uses nonce-bound **Sign in with Apple**, without email/name scopes.
@@ -185,7 +193,7 @@ Watch receives snapshots through WatchConnectivity, **never the bridge token**. 
 
 ## Refresh and security tradeoffs
 
-- iPhone refreshes on foreground/manual request; WidgetKit scheduling is controlled by the OS. Background delivery and Watch connectivity are not guaranteed. No push-notification or real-time refresh promise.
+- iPhone refreshes on foreground when refresh-on-open is enabled (default), or on manual request; WidgetKit scheduling is controlled by the OS. Background delivery and Watch connectivity are not guaranteed. No push-notification or real-time refresh promise.
 - Data older than 15 minutes is stale. Check the observed time before relying on a bar.
 - The bridge host and CodexBar have privileged access to provider sessions. Keep both trusted and patched. QuotaDock is not a credential vault or an official provider client.
 - Bearer tokens grant snapshot access. HTTPS protects transport; VPN/firewalls reduce exposure. Neither prevents access by someone who has stolen the token.
@@ -205,7 +213,7 @@ python3 .agents/skills/checking-codexbar-usage/scripts/test_codexbar.py
 ```
 
 `npm test` strictly typechecks and builds the React dashboard, runs the bridge
-contracts, then nine Chromium browser contracts against the built bridge. Those
+contracts, then Chromium browser contracts against the built bridge. Those
 check safe pairing, cache preservation, disconnect races, deadlines, background
 pause and keyboard controls. `web-dist/` is generated, not committed; direct
 `node bridge/cli.mjs serve` requires `npm run build` first. Collector-only commands

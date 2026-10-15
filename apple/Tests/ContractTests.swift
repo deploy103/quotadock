@@ -114,7 +114,7 @@ final class ContractTests: XCTestCase {
             XCTAssertEqual(me.earlyBatchesUsed, 2)
             XCTAssertEqual(me.limits.accounts, Int(cap))
             XCTAssertFalse(me.purchasesAvailable)
-            XCTAssertTrue(me.budget.contains(tier.capitalized))
+            XCTAssertEqual(me.tier.rawValue, tier)
             XCTAssertFalse(me.budget.contains("never display"))
             let enabled = json.replacingOccurrences(of: "\"purchasesAvailable\":false", with: "\"purchasesAvailable\":true")
             XCTAssertThrowsError(try CloudMe.decode(Data(enabled.utf8)))
