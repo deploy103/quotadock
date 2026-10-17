@@ -17,57 +17,70 @@ struct AccountSurfaceContent: View {
         DockL10n.text(account?.observedAt == nil ? "Not observed" : account?.reading.isStale(at: date) == true ? "Stale" : "Cached")
     }
     private var identifier: String { account.map { String($0.id.uuidString.prefix(8)) } ?? "—" }
+    private var value: String { window.flatMap(QuotaPresentation.percent) ?? DockL10n.text("Unknown") }
+
     var body: some View {
-        let value = window.flatMap(QuotaPresentation.percent) ?? DockL10n.text("Unknown")
         Group {
             if surface == .inline {
-                Group {
-                    if let account {
-                        Text("\(account.provider.displayName) \(value) · \(status) · \(String(identifier.prefix(4)))")
-                    } else {
-                        Text("\(DockL10n.text("Account unavailable")) · \(DockL10n.text("Unknown"))")
-                    }
-                }
-                .font(.caption).lineLimit(1).minimumScaleFactor(0.7)
+                inlineContent
             } else if surface == .circular {
-                VStack(spacing: 1) {
-                    if let account { ProviderIcon(id: account.provider, size: 12) }
-                    Text(identifier).font(.system(size: 8)).lineLimit(1)
-                    Text(value).font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
-                    Text(status).font(.system(size: 9))
-                }
+                circularContent
             } else {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 3) {
-                        Text(account?.provider.displayName ?? DockL10n.text("Account unavailable")).bold()
-                        Spacer(minLength: 0)
-                        Text(identifier).monospaced()
-                    }.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
-                    if surface != .rectangular {
-                        Text(account?.plan ?? DockL10n.text("Plan unknown")).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 3) {
-                        Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(value).monospacedDigit().fixedSize()
-                    }.font(surface == .rectangular ? .caption2 : .caption)
-                    if let remaining = window?.clampedRemaining {
-                        ProgressView(value: remaining, total: 100).tint(DockTheme.mint).accessibilityHidden(true)
-                    }
-                    if surface != .rectangular, let reset = window?.resetsAt {
-                        Text(reset <= date ? DockL10n.text("Reset passed · awaiting observation") :
-                            DockL10n.format("Reset: %@", DockL10n.date(reset))).font(.system(size: 9))
-                    }
-                    Text(freshness).font(.system(size: 9)).foregroundStyle(.secondary)
-                    if surface != .rectangular {
-                        Text(DockL10n.text("Cached readings · not live")).font(.system(size: 9))
-                    }
-                }
+                expandedContent
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint((account?.provider.displayName ?? DockL10n.text("Account unavailable")) + ". " +
             (accountID.map { "account-" + $0.uuidString.lowercased() } ?? DockL10n.text("Choose account")) + ". " + freshness)
+    }
+
+    private var inlineContent: some View {
+        Group {
+            if let account {
+                Text("\(account.provider.displayName) \(value) · \(status) · \(String(identifier.prefix(4)))")
+            } else {
+                Text("\(DockL10n.text("Account unavailable")) · \(DockL10n.text("Unknown"))")
+            }
+        }
+        .font(.caption).lineLimit(1).minimumScaleFactor(0.7)
+    }
+
+    private var circularContent: some View {
+        VStack(spacing: 1) {
+            if let account { ProviderIcon(id: account.provider, size: 12) }
+            Text(identifier).font(.system(size: 8)).lineLimit(1)
+            Text(value).font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            Text(status).font(.system(size: 9))
+        }
+    }
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                Text(account?.provider.displayName ?? DockL10n.text("Account unavailable")).bold()
+                Spacer(minLength: 0)
+                Text(identifier).monospaced()
+            }.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
+            if surface != .rectangular {
+                Text(account?.plan ?? DockL10n.text("Plan unknown")).font(.caption2).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 3) {
+                Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")).lineLimit(1)
+                Spacer(minLength: 0)
+                Text(value).monospacedDigit().fixedSize()
+            }.font(surface == .rectangular ? .caption2 : .caption)
+            if let remaining = window?.clampedRemaining {
+                ProgressView(value: remaining, total: 100).tint(DockTheme.mint).accessibilityHidden(true)
+            }
+            if surface != .rectangular, let reset = window?.resetsAt {
+                Text(reset <= date ? DockL10n.text("Reset passed · awaiting observation") :
+                    DockL10n.format("Reset: %@", DockL10n.date(reset))).font(.system(size: 9))
+            }
+            Text(freshness).font(.system(size: 9)).foregroundStyle(.secondary)
+            if surface != .rectangular {
+                Text(DockL10n.text("Cached readings · not live")).font(.system(size: 9))
+            }
+        }
     }
 }
 
