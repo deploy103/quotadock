@@ -95,6 +95,10 @@ final class PreviewUITests: XCTestCase {
     private func assertNavigationUnobscured(_ app: XCUIApplication, button: XCUIElement, noticeID: String) {
         let notice = app.staticTexts[noticeID]
         XCTAssertTrue(notice.exists)
+        // Locale changes can finish rendering before the menu's hit-test transition settles.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: notice)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed,
+                       "Preview notice must become reachable after the transition")
         XCTAssertTrue(notice.isHittable)
         XCTAssertTrue(button.isHittable)
         XCTAssertFalse(button.frame.intersects(notice.frame), "Preview notice must not cover navigation controls")
