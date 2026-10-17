@@ -365,9 +365,28 @@ test('plans stay read-only, bilingual and concise without collecting paired quot
       await page.locator('header select').selectOption(language);
       await expect(page.getByRole('heading', { name: language === 'ko' ? '요금제' : 'Plans', exact: true })).toBeVisible();
       await expect(page.getByRole('article')).toHaveCount(3);
-      await expect(page.getByRole('article', { name: 'Plus', exact: true })).toContainText('3,990');
-      await expect(page.getByRole('article', { name: 'Pro', exact: true })).toContainText(language === 'ko' ? '가격 미정' : 'Price undecided');
-      await expect(page.getByRole('article', { name: 'Plus', exact: true })).toContainText(language === 'ko' ? '/ 월' : '/ month');
+      const plus = page.getByRole('article', { name: 'QuotaDock Plus', exact: true });
+      const pro = page.getByRole('article', { name: 'QuotaDock Pro', exact: true });
+      for (const cycle of ['month', 'year']) {
+        await page.getByRole('combobox', { name: language === 'ko' ? '결제 주기' : 'Billing cycle' }).selectOption(cycle);
+        await expect(plus.locator('.plan-price')).toContainText(cycle === 'month' ? '2,990' : '29,900');
+        await expect(pro.locator('.plan-price')).toContainText(cycle === 'month' ? '5,990' : '59,900');
+        await expect(pro).toContainText(language === 'ko' ? 'AI 계정 최대 25개' : 'Up to 25 AI accounts');
+        await expect(plus).toContainText(language === 'ko' ? '무료 1개월 후' : 'after 1 free month:');
+        await expect(plus.locator('p').filter({ hasText: language === 'ko' ? '무료 1개월 후' : 'after 1 free month:' })).toContainText(cycle === 'month' ? '2,990' : '29,900');
+        await expect(pro).not.toContainText(/1개월 무료|1 month free/);
+        await expect(page.getByRole('article', { name: 'QuotaDock Free', exact: true })).not.toContainText(/1개월 무료|1 month free/);
+        await expect(page.locator('.trial-details')).toHaveCount(1);
+        for (const state of ['closed', 'expanded']) {
+          await page.locator('.trial-details').evaluate((element, open) => { (element as HTMLDetailsElement).open = open; }, state === 'expanded');
+          await page.locator('.plan-terms').evaluate((element, open) => { (element as HTMLDetailsElement).open = open; }, state === 'expanded');
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+          if (process.env.CAPTURE_PLANS) await page.screenshot({ path: `.amp/in/artifacts/final-plans-${language}-${width}-${cycle}-${state}.png`, fullPage: true });
+        }
+        await expect(plus.locator('.trial-details')).toContainText(language === 'ko' ? '이 웹은 현재 방문자의 자격을 확인하지 않습니다.' : 'This web page does not determine your eligibility.');
+      }
+      await page.locator('.trial-details summary').click();
+      await page.locator('.plan-terms summary').click();
       await expect(page.getByRole('button')).toHaveCount(0);
       await expect(page.locator('main')).not.toContainText(/목표|출시|준비 중|release target|not on sale|not available yet|month target/i);
       await expect(page.locator('.plan-terms')).not.toHaveAttribute('open');
@@ -380,7 +399,7 @@ test('plans stay read-only, bilingual and concise without collecting paired quot
   await page.locator('.plan-terms summary').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByText('개인정보', { exact: true })).toBeVisible();
-  await expect(page.locator('.plan-terms')).toContainText('최대 50계정');
+  await expect(page.locator('.plan-terms')).toContainText('Apple StoreKit');
   if (process.env.CAPTURE_PLANS) await page.screenshot({ path: '.amp/in/artifacts/plans-ko-details-390.png', fullPage: true });
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
