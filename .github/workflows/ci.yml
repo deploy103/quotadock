@@ -28,6 +28,22 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: python3 .agents/skills/checking-codexbar-usage/scripts/test_codexbar.py
+  webkit:
+    name: macOS WebKit dashboard controls and language tests
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps webkit
+      - run: npm run build
+      - run: npm run test:web -- --browser=webkit
   storage:
     name: Non-root portable storage and bridge failure contracts
     runs-on: ubuntu-latest
