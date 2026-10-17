@@ -27,7 +27,8 @@ the collector. `QUOTADOCK_CODEXBAR_BIN` selects that executable.
 
 CLI failures use fixed categories: `configuration`, `permissions`,
 `grant_expired`, `revoked`, `bindings`, `unsupported_source`, `cli_availability`
-and `service`. Each includes recovery instructions rather than raw exception or
+and `service`, plus `unsupported_identity` and `ambiguous_scope` for identity
+boundaries. Each includes recovery instructions rather than raw exception or
 child text. Stop the worker before repairs or mapping changes. Never re-pair over
 an existing grant: revoke on the phone and remove both old private files first.
 Permission failures must be repaired, not bypassed; Windows ACL support remains
@@ -52,11 +53,17 @@ a private 0700 directory). Do not copy it into issues, logs or source control.
 Revoke in the phone's collector list; remove the local file before re-pairing.
 Grants expire after 30 days and are not silently renewed.
 
-One unbound slot per provider uses CodexBar's current local login. For independent
-Claude, Codex and Grok slots, use a recent CodexBar with `--all-accounts` and
-`cacheAccountKey` JSON support. Older versions fail closed: they never substitute
-the active account. Gemini remains one slot because its CLI has no independent
-account selector. Registering more slots does not create upstream eligibility.
+## Independent accounts
+
+One unbound slot per provider uses CodexBar's current local login. Independent
+slots require explicit durable selection keys. CodexBar HEAD `6480977b` public
+CLI JSON excludes the internal top-level `cacheAccountKey`; installing a recent
+build does not make `--all-accounts` JSON keyed. The collector fails closed with
+`unsupported_identity` for missing keys or `ambiguous_scope` for duplicate keys,
+never substituting the active account, labels or array order. The mapping commands
+below require a separately verified keyed adapter; public CodexBar alone does not
+establish that contract. Gemini remains one slot. Registering slots does not
+create upstream eligibility or verify distinct quota owners.
 
 ```sh
 # These commands query locally configured accounts, contacting provider APIs.
@@ -85,13 +92,44 @@ removing old `accounts.json` as well as the old grant, after revocation.
 
 A grant/batch has at most 50 slots. The phone selects a batch; initial selection
 is the first 50 server-listed slots. An active Live session retains its server's
-selection until stopped. Pro registration is uncapped, not an unbounded request.
+selection until stopped. Plan limits are Free 3 accounts/1 collector, Plus 10/3
+and Pro 25/5; the 50-slot batch ceiling is not an account entitlement.
 CodexBar `--all-accounts` may query unselected locally configured accounts within
 that provider/source group; only explicitly selected matches are uploaded.
 Verify this cost and provider policies before enabling frequent Live collection.
 Only sanitized observations are sent, never identities, diagnostics, credentials
 or raw command output. Multi-account behavior is fixture-tested, not yet verified
 with real independently authenticated provider accounts.
+
+`bridge/codex-app-server.mjs` is a standalone experimental adapter, not integrated
+with this collector, cloud-ready or verified with real accounts. It exposes
+workspace-scoped Codex quota without email, not verified human identities or
+total ChatGPT usage. OpenAI's [app-server authentication documentation](https://developers.openai.com/codex/app-server#auth-endpoints)
+states that app-server authentication is not permitted for commercial or hosted
+services. It is not a production billing integration path. The passive
+[Claude statusline parser](claude-statusline.md) is also standalone and has no
+verified account attribution or provider observation timestamp. Neither reader
+is connected to cloud accounts. No credential scraping is used or supported.
+
+### Provider interfaces checked on 2026-10-17
+
+- **Claude:** the documented [statusline JSON](https://code.claude.com/docs/en/statusline)
+  supplies optional 5-hour/7-day usage, not a stable account identity or source
+  observation time. The passive parser makes no new provider request. Anthropic's
+  [credential restrictions](https://code.claude.com/docs/en/legal-and-compliance)
+  still apply; a documented display field is not a commercial permission grant.
+- **Codex:** the isolated app-server experiment reads only a Codex quota bucket,
+  not total ChatGPT usage. Workspace identity is not unique human identity; the
+  commercial/hosted authentication restriction above blocks product integration.
+- **Gemini:** Google's [transition announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)
+  ended consumer Free/Google AI Pro/Ultra access to Gemini CLI on 2026-06-18.
+  Code Assist Standard/Enterprise and paid API-key paths are distinct. Do not
+  promise that an old Gemini CLI consumer login still supplies quota; Antigravity
+  account/quota integration has not been implemented or validated here.
+- **Grok:** the official [consumer FAQ](https://docs.x.ai/grok/faq#usage--limits)
+  documents percentage and weekly reset in **Settings → Usage**. That UI is not
+  evidence of an authorized third-party consumer quota-export API. No such
+  integration or permission has been established here; no cookie scraping added.
 
 Collection is uncached, waits past the job's whole-second issue boundary, and
 preserves CodexBar's source timestamp. Missing timestamps/data, stale source

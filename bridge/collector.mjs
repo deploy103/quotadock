@@ -26,7 +26,7 @@ function query(binary, id, timeoutMs, source = null) {
       try {
         // Some providers fail independently and still emit usable JSON with nonzero exit.
         const rows = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        finish(Array.isArray(rows) && rows.some(row => row?.provider === id) ? rows.filter(row => row?.provider === id) : failed());
+        finish(Array.isArray(rows) && (rows.length === 0 || rows.some(row => row?.provider === id)) ? rows.filter(row => row?.provider === id) : failed());
       } catch { finish(failed()); }
     });
   });
@@ -37,6 +37,9 @@ export async function collect({ binary = 'codexbar', timeoutMs = 12000 } = {}) {
   return snapshotFromRows(rows);
 }
 
+// Explicit adapter keys are unverified local selection scopes, not provider-owner
+// identities: replacing credentials can change the owner behind the same key.
+// Public CodexBar 0.77.1 omits cacheAccountKey from ProviderPayload.CodingKeys.
 // Keys can contain upstream email/workspace identifiers. Only opaque hashes stay
 // in local mapping files; neither raw keys nor hashes are uploaded in observations.
 export function accountFingerprint(provider, key) {
@@ -49,9 +52,16 @@ function accountSource(provider, source) {
 export async function listAccounts(provider, source = 'oauth', { binary = 'codexbar', timeoutMs = 12000 } = {}) {
   accountSource(provider, source);
   const rows = await query(binary, provider, timeoutMs, source);
+  const problem = scopeProblem(provider, rows);
+  if (problem) throw Error(problem);
+  if (rows.some(r => r.error)) throw Error('provider_lookup');
   const keys = rows.map(r => accountFingerprint(provider, r.cacheAccountKey)).filter(Boolean);
-  // Duplicate keys cannot identify a unique local reading, even if values agree.
-  return keys.filter((key, index) => keys.indexOf(key) === index && keys.lastIndexOf(key) === index);
+  return keys;
+}
+function scopeProblem(provider, rows) {
+  if (rows.some(r => !r.error && !accountFingerprint(provider, r.cacheAccountKey))) return 'unsupported_identity';
+  const keys = rows.map(r => accountFingerprint(provider, r.cacheAccountKey)).filter(Boolean);
+  return new Set(keys).size !== keys.length ? 'ambiguous_scope' : null;
 }
 export function validateBindings(slots, bindings) {
   if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings) || Object.keys(bindings).length > 50) throw Error('unsupported_mapping');
@@ -77,13 +87,18 @@ export async function collectAccounts(slots, bindings, { binary = 'codexbar', ti
     groups.set(`${slot.provider}:${source}`, { provider: slot.provider, source });
   }
   const rows = new Map(await Promise.all([...groups].map(async ([key, { provider, source }]) => [key, await query(binary, provider, timeoutMs, source)])));
-  return slots.map(slot => {
+  const compatibilityError = [...groups].filter(([, g]) => g.source).map(([key, g]) => scopeProblem(g.provider, rows.get(key))).find(Boolean);
+  const result = slots.map(slot => {
     const binding = bindings[slot.id];
-    const candidates = rows.get(`${slot.provider}:${binding?.source ?? null}`).filter(row => !binding || accountFingerprint(slot.provider, row.cacheAccountKey) === binding.fingerprint);
+    const group = rows.get(`${slot.provider}:${binding?.source ?? null}`);
+    const candidates = binding && scopeProblem(slot.provider, group) ? [] : group.filter(row => !binding || accountFingerprint(slot.provider, row.cacheAccountKey) === binding.fingerprint);
     // No positional, label or ambient-account fallback for a missing/ambiguous key.
     const payload = candidates.length === 1 ? candidates[0] : { error: { kind: 'account' } };
     return { accountId: slot.id, ...normalizeProvider(slot.provider, payload) };
   });
+  // Local-only signal: complete outstanding jobs with sanitized errors before stopping.
+  Object.defineProperty(result, 'compatibilityError', { value: compatibilityError });
+  return result;
 }
 
 export function cachedCollector(load, { ttlMs = 60000, now = () => performance.now() } = {}) {

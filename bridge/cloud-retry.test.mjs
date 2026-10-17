@@ -161,6 +161,22 @@ test('lost committed completion replays original sanitized observation without r
   await assert.rejects(runOnce(config(), { requestFn: expiring.requestFn }), { message: 'service' });
   assert.equal(expiring.calls.length, 2);
   assert.equal(await readFile(counter, 'utf8'), '11');
+  // A mapped slot must not consume that same keyless ambient/public row.
+  const mapped = { ...config(), bindings: { [slot.id]: { provider: 'codex', source: 'oauth', fingerprint: '1'.repeat(64) } } };
+  for (const failCompletion of [false, true]) {
+    const bodies = [];
+    const incompatible = transport(call => {
+      if (call.path.endsWith('/next')) return { body: { job } };
+      bodies.push(call.wire);
+      return bodies.length === 1 ? lost : failCompletion ? { status: 500 } : { body: { status: 'complete' } };
+    });
+    await assert.rejects(runOnce(mapped, { automatic: true, requestFn: incompatible.requestFn }), { message: 'unsupported_identity' });
+    assert.equal(incompatible.calls.length, 3);
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0], bodies[1]);
+    assert.deepEqual(JSON.parse(bodies[0]).observations.map(o => [o.state, o.observedAt, o.windows]), [['error', null, []]]);
+    assert.doesNotMatch(bodies[0], /PRIVATE_TOKEN|email@example|fingerprint|unsupported_identity/);
+  }
 });
 
 test('only allowlisted transient HTTP and transport failures retry, at most three attempts', async () => {

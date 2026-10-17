@@ -107,6 +107,9 @@ async function loadBindings(file) {
   try { return await loadJSON(file); } catch (e) { if (e.code === 'ENOENT') return {}; throw e; }
 }
 const diagnostics = {
+  unsupported_identity: 'Stop the worker. This CLI output lacks explicit local selection keys; public CodexBar 0.77.1 cannot discover independent account mappings. Use a separately verified adapter or remove mapped slots; labels and order are not identities.',
+  ambiguous_scope: 'Stop the worker. The adapter returned duplicate local selection keys. Resolve ambiguous scopes before restarting; keys do not verify provider ownership.',
+  provider_lookup: 'CodexBar provider lookup failed. Check the provider locally; private child diagnostics are withheld.',
   configuration: 'Check command syntax and private configuration. Stop the worker; if the grant is missing or malformed, revoke on the phone and remove old collector.json and accounts.json before re-pairing.',
   permissions: 'Stop the worker. Use an owned, non-symlink private directory (0700) and regular private files (0600) on POSIX; do not bypass ownership checks.',
   grant_expired: 'Stop the worker. Revoke on the phone, remove old collector.json and accounts.json, then re-pair with the trusted HTTPS origin.',
@@ -193,8 +196,17 @@ export async function runOnce(c, { automatic = false, requestFn = request, opera
   if (Date.now() >= until) return;
   const bindings = Object.fromEntries(slots.filter(a => c.bindings?.[a.id]).map(a => [a.id, c.bindings[a.id]]));
   const snapshot = await collectAccounts(slots, bindings, { binary: process.env.QUOTADOCK_CODEXBAR_BIN || 'codexbar', timeoutMs: Math.min(12000, until - Date.now()) });
-  if (Date.now() >= until) return;
-  await call(`/v2/collector/refresh/${job.id}/complete`, { observations: observations(slots, snapshot) }, until);
+  if (Date.now() >= until) {
+    if (snapshot.compatibilityError) throw Error(snapshot.compatibilityError);
+    return;
+  }
+  try {
+    await call(`/v2/collector/refresh/${job.id}/complete`, { observations: observations(slots, snapshot) }, until);
+  } finally {
+    // Completion retains bounded identical-body retries, but incompatibility must
+    // stop the worker even if completion fails, rather than minting more due jobs.
+    if (snapshot.compatibilityError) throw Error(snapshot.compatibilityError);
+  }
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);

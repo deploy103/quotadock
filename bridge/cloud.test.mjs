@@ -125,7 +125,7 @@ test('mapping CLI stores private canonical bindings and preserves them on invali
   assert.deepEqual((await readdir(dir)).sort(), ['accounts.json', 'collector.json']);
 });
 
-test('independent local accounts use durable keys, not order or ambient credentials, and never upload identity', async t => {
+test('unverified explicit-key adapter selects local scopes, not verified provider owners', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'quotadock-accounts-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const binary = join(dir, 'codexbar');
@@ -133,7 +133,7 @@ test('independent local accounts use durable keys, not order or ambient credenti
     { provider: 'codex', cacheAccountKey: 'codex:workspace:two:email:private@example.com', account: 'SECRET', usage: { updatedAt: '2026-10-13T12:01:02Z', loginMethod: 'ChatGPT Pro', primary: { usedPercent: 87 } } },
     { provider: 'codex', cacheAccountKey: 'codex:stored:one', account: 'SECRET', usage: { updatedAt: '2026-10-13T12:03:04Z', loginMethod: 'Free', primary: { usedPercent: 16 } } },
   ];
-  const writeCLI = async value => writeFile(binary, `#!${process.execPath}\nconst selected = process.argv.includes('--all-accounts') && process.argv[process.argv.indexOf('--source') + 1] === 'oauth';\nprocess.stdout.write(JSON.stringify(selected ? ${JSON.stringify(value)} : [{provider:'codex',usage:{primary:{usedPercent:1}}}]));\nprocess.exitCode=1;\n`, { mode: 0o700 });
+  const writeCLI = async value => writeFile(binary, `#!${process.execPath}\nif (process.argv.includes('--version')) process.exit(0);\nconst selected = process.argv.includes('--all-accounts') && process.argv[process.argv.indexOf('--source') + 1] === 'oauth';\nprocess.stdout.write(JSON.stringify(selected ? ${JSON.stringify(value)} : [{provider:'codex',usage:{primary:{usedPercent:1}}}]));\nprocess.exitCode=1;\n`, { mode: 0o700 });
   await writeCLI(rows);
   const fingerprint = key => createHash('sha256').update(`codex\0${key}`).digest('hex');
   const bindings = {
@@ -153,7 +153,32 @@ test('independent local accounts use durable keys, not order or ambient credenti
   assert.throws(() => validateBindings([a], { [b.id]: bindings[b.id] }));
   await assert.rejects(listAccounts('gemini', 'oauth', { binary }));
   await writeCLI([rows[1], rows[1]]);
-  assert.deepEqual(await listAccounts('codex', 'oauth', { binary }), []);
+  await assert.rejects(listAccounts('codex', 'oauth', { binary }), { message: 'ambiguous_scope' });
   const failed = observations([a, b], await collectAccounts([a, b], bindings, { binary }));
   assert.deepEqual(failed.map(o => [o.state, o.observedAt, o.windows]), [['error', null, []], ['error', null, []]]);
+  // Public ProviderPayload CodingKeys at upstream 6480977b (0.77.1):
+  // account is a display label; cacheAccountKey is deliberately not serialized.
+  const publicRows = rows.map(({ cacheAccountKey, ...row }, index) => ({ ...row, source: 'oauth', version: '0.77.1', account: `private${index}@example.test` }));
+  for (const value of [publicRows, [...publicRows].reverse()]) {
+    await writeCLI(value);
+    await assert.rejects(listAccounts('codex', 'oauth', { binary }), { message: 'unsupported_identity' });
+    const snapshot = await collectAccounts([a, b], bindings, { binary });
+    assert.equal(snapshot.compatibilityError, 'unsupported_identity');
+    const uploaded = observations([a, b], snapshot);
+    assert.deepEqual(uploaded.map(o => [o.state, o.observedAt, o.windows]), [['error', null, []], ['error', null, []]]);
+    assert.doesNotMatch(JSON.stringify(uploaded), /private|SECRET|cacheAccountKey|fingerprint/);
+    await assert.rejects(promisify(execFile)(process.execPath, [new URL('./cloud.mjs', import.meta.url).pathname, 'accounts', 'codex'], {
+      env: { ...process.env, QUOTADOCK_CODEXBAR_BIN: binary }, timeout: 5000,
+    }), error => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, '');
+      assert.match(error.stderr, /\[unsupported_identity\].*Stop the worker/);
+      assert.doesNotMatch(error.stderr, /private|SECRET|fingerprints|cacheAccountKey/);
+      return true;
+    });
+  }
+  await writeCLI([]);
+  assert.deepEqual(await listAccounts('codex', 'oauth', { binary }), []);
+  await writeCLI([{ provider: 'codex', error: { message: 'private@example.test' } }]);
+  await assert.rejects(listAccounts('codex', 'oauth', { binary }), { message: 'provider_lookup' });
 });
