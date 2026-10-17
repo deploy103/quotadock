@@ -73,3 +73,11 @@
 "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer." = "연결이 삭제되었습니다. 오프라인 상태의 Watch와 위젯에는 다음 전송까지 이미 표시된 내용이 남을 수 있습니다.";
 "DEMO · Sign in again — cloud session expired or rejected. Original observations retained." = "DEMO · 다시 로그인하세요 — 클라우드 세션이 만료되었거나 거부되었습니다. 기존 측정값은 유지됩니다.";
 "DEMO · Local account cleared. Waiting for server erasure confirmation." = "DEMO · 기기의 계정 정보가 지워졌습니다. 서버 삭제 확인을 기다리는 중입니다.";
+"UI PREVIEW · sample data only" = "UI 프리뷰 · 샘플 데이터 전용";
+"This preview uses sample data only. Apple login, connections, purchases, widgets and Watch are not included." = "이 프리뷰는 샘플 데이터만 표시합니다. Apple 로그인·계정 연결·결제·위젯·Watch 기능은 포함하지 않습니다.";
+"Preview preferences are saved only in this separate app. No usage is collected or refreshed." = "환경설정은 이 별도 프리뷰 앱에만 저장됩니다. 실제 사용량을 수집하거나 갱신하지 않습니다.";
+"Sample state" = "샘플 상태";
+"Sample readings" = "기본 샘플";
+"Unknown readings" = "알 수 없음";
+"Stale readings" = "오래된 정보";
+"Exhausted readings" = "잔여량 소진";

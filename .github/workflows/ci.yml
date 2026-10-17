@@ -82,12 +82,20 @@ jobs:
           # Disabling signing makes the real generation-fenced cache inaccessible.
           # No Apple account, signing certificate, or provisioning profile is used.
           xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath DerivedData -resultBundlePath NativeTests.xcresult -parallel-testing-enabled NO test CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES
+      - name: Test isolated UI preview without production capabilities
+        working-directory: apple
+        run: |
+          xcodegen generate --spec project-preview.yml
+          xcodebuild -project QuotaDockPreview.xcodeproj -scheme QuotaDockPreview -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -derivedDataPath DerivedData/Preview -resultBundlePath PreviewTests.xcresult -parallel-testing-enabled NO test CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES
       - name: Export native interaction screenshots
         if: always()
         working-directory: apple
         run: |
           if [ -d NativeTests.xcresult ]; then
             xcrun xcresulttool export attachments --path NativeTests.xcresult --output-path NativeAttachments
+          fi
+          if [ -d PreviewTests.xcresult ]; then
+            xcrun xcresulttool export attachments --path PreviewTests.xcresult --output-path PreviewAttachments
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -96,6 +104,8 @@ jobs:
           path: |
             apple/NativeAttachments
             apple/NativeTests.xcresult
+            apple/PreviewAttachments
+            apple/PreviewTests.xcresult
           retention-days: 7
       - name: Build Watch app and complications
         working-directory: apple

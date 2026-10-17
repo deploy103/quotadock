@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .target(name: "QuotaDockStorage", path: ".", exclude: [
             "Assets.xcassets", "Resources", "Tests", "UITests", "Watch", "Widgets",
-            "PortableTests", "README.md", "project.yml", "verify-persistence.py",
+            "PortableTests", "Preview", "README.md", "project.yml", "project-preview.yml", "verify-persistence.py",
             "iOS/ConnectionStore.swift",
             "iOS/Cloud.swift", "iOS/FirstRun.swift", "iOS/Purchases.swift",
             "iOS/QuotaAccessibilityPreview.swift", "iOS/QuotaDockApp.swift",

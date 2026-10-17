@@ -2,6 +2,45 @@
 
 Small SwiftUI source tree targeting **iOS 17 / watchOS 10, Xcode 16+**. No runtime dependencies. XcodeGen 2.42+ is the only project-generation tool.
 
+## Try the UI before Apple Developer enrollment
+
+`project-preview.yml` builds a separate **QD Preview** iPhone app with bundle ID
+`com.quotadock.app.preview`. It reuses the production provider cards, gauges,
+icons, translations and first-run views. It displays labelled sample data only;
+it is **not** a substitute for signing or integration-testing the production app.
+The original `project.yml` and its four targets/entitlements are unchanged.
+
+```sh
+cd apple
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcodegen generate --spec project-preview.yml
+open QuotaDockPreview.xcodeproj
+# Select the existing Personal Team for QuotaDockPreview, then run on iPhone.
+# Use a disposable simulator for the preview's UI test scheme.
+```
+
+Device UI tests may target only a **fresh, explicitly authorized QD Preview
+installation**. They change that preview's language/setup choices and may need a
+separately provisioned UI-test runner. Never run the production persistence
+harness on a phone. A stalled simulator test is not a passing result; a device
+preview test is separate evidence, not production integration acceptance.
+
+The preview source allowlist excludes bridge/cloud clients, connection authority,
+purchases, Watch and widget adapters. No App Group, shared Keychain group, Apple
+sign-in capability or embedded extension is configured. `SnapshotStore` and
+`CacheFiles` compile solely because setup reads `RefreshSettings`; the preview
+does not call their cache operations, and its Info.plist has no App Group key.
+Language/setup preferences live in the preview's separate app sandbox. No provider
+credential, server URL or real account can be entered. The refresh preference is
+display-only configuration here: no collection or background refresh occurs.
+
+The **Sample state** menu switches between normal, unknown, stale and exhausted
+readings. Unknown is not 0%; stale retains the sample observation time, shifted
+one hour earlier. Language/scenario changes never make that observation fresh.
+Settings supports English/Korean and revisiting setup. A Personal Team installation
+normally needs re-signing after seven days. Actual widgets/Watch, Apple sign-in,
+StoreKit and provider collection remain production integration gates.
+
 ## Generate, build and test on a Mac
 
 ```sh

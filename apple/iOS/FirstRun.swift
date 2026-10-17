@@ -1,5 +1,7 @@
 import SwiftUI
+#if !QUOTADOCK_UI_PREVIEW
 import WidgetKit
+#endif
 
 @MainActor
 final class InterfaceSettings: ObservableObject {
@@ -18,8 +20,10 @@ final class InterfaceSettings: ObservableObject {
         guard language != next else { return }
         DockL10n.save(next)
         language = next
+        #if !QUOTADOCK_UI_PREVIEW
         WidgetCenter.shared.reloadAllTimelines()
         if synchronize { WatchSync.shared.syncLanguage() }
+        #endif
     }
 
     func chooseForegroundRefresh(_ enabled: Bool, persist: Bool = true) {
@@ -164,6 +168,9 @@ struct FirstRunView: View {
                             Text(setupFormat("Step %@ of 3", String(progress.step.index + 1)))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.id("setup-top")
+                        #if QUOTADOCK_UI_PREVIEW
+                        PreviewNotice(identifier: "preview-notice-setup")
+                        #endif
                         Text(title).font(.largeTitle.bold())
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
@@ -224,15 +231,22 @@ struct FirstRunView: View {
 
     private var connection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            #if QUOTADOCK_UI_PREVIEW
+            Text(setupText("This preview uses sample data only. Apple login, connections, purchases, widgets and Watch are not included."))
+                .foregroundStyle(.secondary)
+            #else
             Text(setupText("Nothing connects until you explicitly finish the relevant connection screen. You can change this later."))
                 .foregroundStyle(.secondary)
+            #endif
             route(.demo, icon: "play.circle", title: "Explore demo", detail: "See clearly labelled sample data. No account, collector or network connection needed.")
+            #if !QUOTADOCK_UI_PREVIEW
             route(.bridge, icon: "link", title: "Pair my own bridge", detail: "Use a trusted HTTPS bridge and its pairing token. This is not your AI service password.")
             route(.cloud, icon: "icloud", title: "Optional cloud account", detail: "Review the server and two separate consents, then use Sign in with Apple. The server also stores account, session, consent and billing metadata.")
             route(.later, icon: "clock", title: "Connect later", detail: "Open the dashboard without connecting. Existing connections and cached observations are not deleted.")
             Divider().padding(.top, 8)
             explanation("desktopcomputer", "Fresh readings need an online collector.",
                         "A server alone cannot fetch your subscription allowance. Your local computer and supported provider sessions must be available.")
+            #endif
         }
     }
 
@@ -240,6 +254,10 @@ struct FirstRunView: View {
         VStack(alignment: .leading, spacing: 24) {
             Toggle(setupText("Refresh when I open the app"), isOn: $progress.foregroundAutoRefresh)
                 .accessibilityIdentifier("setup-foreground-refresh")
+            #if QUOTADOCK_UI_PREVIEW
+            Text(setupText("Preview preferences are saved only in this separate app. No usage is collected or refreshed."))
+                .font(.callout).foregroundStyle(.secondary)
+            #else
             Text(setupText("On by default. Turn it off to use the refresh button or pull to refresh. Changing this does not change your collector's background setting or spend a manual refresh allowance."))
                 .font(.callout).foregroundStyle(.secondary)
             Divider()
@@ -249,6 +267,7 @@ struct FirstRunView: View {
                         "Install the companion Watch app, open both apps and refresh on iPhone. Transfers may be delayed. Small surfaces show the first account per provider, not account totals.")
             explanation("lock.shield", "You stay in control.",
                         "Language and setup choices are saved locally. Choosing cloud here is not consent, login or a subscription purchase. You can revisit setup in Settings.")
+            #endif
             if progress.route == .demo {
                 Text(setupText("You will open DEMO data, not your account. Demo never overwrites your saved observations."))
                     .font(.callout).foregroundStyle(DockTheme.mint)

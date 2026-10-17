@@ -73,3 +73,11 @@
 "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer." = "Pairing removed. Offline Watch/widgets may retain rendered content until next transfer.";
 "DEMO · Sign in again — cloud session expired or rejected. Original observations retained." = "DEMO · Sign in again — cloud session expired or rejected. Original observations retained.";
 "DEMO · Local account cleared. Waiting for server erasure confirmation." = "DEMO · Local account cleared. Waiting for server erasure confirmation.";
+"UI PREVIEW · sample data only" = "UI PREVIEW · sample data only";
+"This preview uses sample data only. Apple login, connections, purchases, widgets and Watch are not included." = "This preview uses sample data only. Apple login, connections, purchases, widgets and Watch are not included.";
+"Preview preferences are saved only in this separate app. No usage is collected or refreshed." = "Preview preferences are saved only in this separate app. No usage is collected or refreshed.";
+"Sample state" = "Sample state";
+"Sample readings" = "Sample readings";
+"Unknown readings" = "Unknown readings";
+"Stale readings" = "Stale readings";
+"Exhausted readings" = "Exhausted readings";
