@@ -43,7 +43,10 @@ final class PurchaseTests: XCTestCase {
     @MainActor
     func testPurchasesRequireAllServerAuthorityAndLogoutClearsAvailability() throws {
         let model = PurchasesModel()
-        let client = try CloudClient(baseURL: "https://example.com", token: String(repeating: "a", count: 43))
+        let client = try CloudClient(baseURL: "https://usage.mvtp.cloud", token: String(repeating: "a", count: 43))
+        let custom = try CloudClient(baseURL: "https://example.com", token: String(repeating: "a", count: 43))
+        model.configure(client: custom, accountToken: UUID(), available: true, onVerified: {})
+        XCTAssertFalse(model.available)
         for (client, token, enabled) in [(nil, UUID(), true), (client, nil, true), (client, UUID(), false)] as [(CloudClient?, UUID?, Bool)] {
             model.configure(client: client, accountToken: token, available: enabled, onVerified: {})
             XCTAssertFalse(model.available)

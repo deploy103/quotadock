@@ -1,5 +1,9 @@
 import XCTest
+#if canImport(QuotaDockStorage)
+@testable import QuotaDockStorage
+#else
 @testable import QuotaDock
+#endif
 
 final class WatchTransferTests: XCTestCase {
     private let date = Date(timeIntervalSince1970: 1234)
@@ -56,6 +60,18 @@ final class WatchTransferTests: XCTestCase {
         XCTAssertEqual(snapshot.generatedAt, date)
         XCTAssertFalse(snapshot.demo)
         XCTAssertTrue(snapshot.providers.isEmpty)
+    }
+
+    func testPersistedDemoCannotBecomeCompanionAuthority() throws {
+        var transfer = WatchTransfer()
+        transfer.reconcile(phoneSnapshot: .preview, at: date)
+        XCTAssertEqual(try decoded(transfer), clear)
+        let mixed = Snapshot(schemaVersion: 1, generatedAt: date, demo: false,
+                             providers: Snapshot.preview.providers)
+        transfer.reconcile(phoneSnapshot: mixed, at: date)
+        XCTAssertEqual(try decoded(transfer), clear)
+        transfer.enqueue(.preview)
+        XCTAssertNil(transfer.pending)
     }
 
     func testTransferContainsOnlySanitizedQuotaAndOriginalObservation() throws {

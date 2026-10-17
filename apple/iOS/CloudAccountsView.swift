@@ -4,19 +4,19 @@ import UIKit
 // Slot UUIDs own linkage. Names/emails are private labels, never proof of identity.
 struct CloudAccountsView: View {
     @ObservedObject var model: CloudModel
+    var requestedAccountID: UUID? = nil
+    @State private var path: [UUID] = []
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
 
     var body: some View {
         let _ = locale
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if model.session != nil {
                     Section(DockL10n.text("Accounts")) {
                         ForEach(model.slots) { slot in
-                            NavigationLink {
-                                CloudAccountDetailsView(model: model, accountID: slot.id)
-                            } label: {
+                            NavigationLink(value: slot.id) {
                                 HStack {
                                     ProviderIcon(id: slot.provider)
                                     Text(model.accountTitle(slot.id, provider: slot.provider))
@@ -51,9 +51,18 @@ struct CloudAccountsView: View {
             }
             .navigationTitle(DockL10n.text("Accounts"))
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: UUID.self) { id in
+                CloudAccountDetailsView(model: model, accountID: id)
+            }
             .toolbar { Button(DockL10n.text("Done")) { dismiss() } }
             .refreshable { await model.read() }
-            .task { if model.session != nil { await model.read() } }
+            .task {
+                if let requestedAccountID { path = [requestedAccountID] }
+                if model.session != nil { await model.read() }
+            }
+            .onChange(of: requestedAccountID) { _, id in
+                if let id { path = [id] }
+            }
         }
     }
 }
@@ -72,6 +81,8 @@ private struct CloudAccountDetailsView: View {
         Form {
             if let slot = model.slots.first(where: { $0.id == accountID }), model.session != nil {
                 Section {
+                    Text(DockL10n.format("Account %@", String(slot.id.uuidString.prefix(8))))
+                        .font(.caption).foregroundStyle(.secondary)
                     CloudAccountLabelField(draft: model.accountLabel(slot.id)) {
                         model.setAccountLabel($0, id: slot.id)
                     }.id("\(model.labelScope ?? "")/\(slot.id)")
@@ -88,7 +99,7 @@ private struct CloudAccountDetailsView: View {
                         Text(DockL10n.text("Unknown — awaiting local collector"))
                     }
                 }
-                Section(DockL10n.text("Link this account")) {
+                Section {
                     TextField(DockL10n.text("Eight uppercase hex pairing code"), text: $code)
                         .textInputAutocapitalization(.characters).autocorrectionDisabled().privacySensitive()
                         .disabled(model.busy || model.selectionLocked)
@@ -111,6 +122,8 @@ private struct CloudAccountDetailsView: View {
                     .disabled(consentAuthority == nil || consentAuthority != model.labelScope ||
                         !CollectorApproval.valid(code: code, selected: [accountID], slots: model.slots) ||
                         model.busy || model.selectionLocked)
+                } header: {
+                    Text(DockL10n.text("Link this account"))
                 } footer: {
                     Text(DockL10n.text("Enter the code from your computer. Approval allows collection, not provider sign-in."))
                 }
@@ -130,7 +143,16 @@ private struct CloudAccountDetailsView: View {
                         .disabled(model.busy || model.selectionLocked)
                 }
             } else {
-                Text(DockL10n.text("Account not listed. Refresh the account list or sign in again."))
+                Section {
+                    Text(DockL10n.text("Account unavailable"))
+                    Text(DockL10n.text("Account not listed. Refresh the account list or sign in again."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button(DockL10n.text("Refresh")) { Task { await model.read() } }
+                        .disabled(model.session == nil || model.busy)
+                    NavigationLink(DockL10n.text(model.session == nil ? "Connect with Apple" : "Connection settings")) {
+                        CloudView(model: model)
+                    }
+                }
             }
         }
         .navigationTitle(DockL10n.text("Account"))

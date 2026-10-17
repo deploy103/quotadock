@@ -22,6 +22,27 @@ enum SnapshotStore {
     static var directory: URL? { groupURL?.appendingPathComponent("QuotaDock-cache", isDirectory: true) }
     static var generation: UUID? { files.flatMap { try? $0.generation() } }
 
+    static var accountCache: AccountSurfaceCache? {
+        guard !blocked, let files, let directory else { return nil }
+        return AccountSurfaceCache(files: files, directory: directory)
+    }
+    static var accountInbox: AccountSurfaceInbox? {
+        guard let cache = accountCache, let groupURL else { return nil }
+        return AccountSurfaceInbox(cache: cache, cursorURL: groupURL.appendingPathComponent("account-surface-cursor"))
+    }
+    static func loadAccounts() -> AccountSurfaceSnapshot? {
+        #if os(watchOS)
+        return accountInbox?.load()
+        #else
+        return accountCache?.load()
+        #endif
+    }
+    static func saveAccounts(_ snapshot: AccountSurfaceSnapshot) throws {
+        guard let cache = accountCache else { throw SnapshotError.invalid }
+        try cache.save(snapshot)
+        try? cache.files.removeInactive(.accounts, in: cache.directory)
+    }
+
     // Establish an empty cache namespace only when no manifest exists. Never
     // repair malformed/unreadable state or derive a fence from a credential.
     static func prepareGeneration() throws -> UUID {
@@ -32,11 +53,20 @@ enum SnapshotStore {
         }
     }
     static func load() -> Snapshot? {
+        #if os(watchOS)
+        if accountInbox?.hasAuthority == true { return loadAccounts()?.legacyProjection ?? accountInbox?.loadLegacy() }
+        #endif
         guard let entry = entry() else { return nil }
         return try? Snapshot.decode(entry.data).sanitized
     }
     // Local persistence time, not a provider observation or delivery acknowledgement.
     static var savedAt: Date? {
+        #if os(watchOS)
+        if accountInbox?.hasAuthority == true {
+            guard loadAccounts() != nil, let files, let directory else { return nil }
+            return (try? files.read(.accounts, in: directory, maximumBytes: maximumPayloadBytes))?.savedAt
+        }
+        #endif
         guard let entry = entry(), (try? Snapshot.decode(entry.data)) != nil else { return nil }
         return entry.savedAt
     }

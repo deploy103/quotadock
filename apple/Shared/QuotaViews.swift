@@ -84,7 +84,8 @@ struct RemainingBar: View {
                 }.frame(height: 12).accessibilityHidden(true)
             }
             if let reset = window.resetsAt {
-                Text(DockL10n.format("Reset: %@", DockL10n.date(reset)))
+                Text(reset <= Date() ? DockL10n.text("Reset passed · awaiting observation") :
+                    DockL10n.format("Reset: %@", DockL10n.date(reset)))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

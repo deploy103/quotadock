@@ -19,6 +19,8 @@ targetTemplates:
     sources:
       - Shared/Snapshot.swift
       - Shared/CacheFiles.swift
+      - Shared/AccountSurface.swift
+      - Shared/WatchTransfer.swift
       - Shared/SnapshotStore.swift
       - Shared/QuotaViews.swift
       - Shared/ProviderIcon.swift
@@ -62,6 +64,9 @@ targets:
         CFBundleDisplayName: QuotaDock
         KeychainGroup: $(KEYCHAIN_GROUP)
         CloudKeychainGroup: $(AppIdentifierPrefix)$(BUNDLE_PREFIX).cloud
+        CFBundleURLTypes:
+          - CFBundleURLName: com.quotadock.app.account
+            CFBundleURLSchemes: [quotadock]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     entitlements:

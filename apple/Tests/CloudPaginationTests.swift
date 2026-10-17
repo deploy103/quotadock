@@ -164,7 +164,7 @@ final class CloudPaginationTests: XCTestCase {
             paths.append(path)
             if path == "v2/me" {
                 return Data("""
-                {"tier":"pro","limits":{"accounts":null,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
+                {"tier":"pro","limits":{"accounts":25,"collectors":5,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
                 """.utf8)
             }
             if path == "v2/collectors" { return Data("{\"collectors\":[]}".utf8) }
@@ -257,7 +257,7 @@ final class CloudPaginationTests: XCTestCase {
                     metadataReads += 1
                     if metadataReads > 1 { return self.freeMetadata }
                     return Data("""
-                    {"tier":"pro","limits":{"accounts":null,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
+                    {"tier":"pro","limits":{"accounts":25,"collectors":5,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
                     """.utf8)
                 }
                 if path == "v2/snapshot/page?limit=250" {
@@ -345,7 +345,7 @@ final class CloudPaginationTests: XCTestCase {
                     enteredMetadata.fulfill()
                 }
                 return Data("""
-                {"tier":"pro","limits":{"accounts":null,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
+                {"tier":"pro","limits":{"accounts":25,"collectors":5,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
                 """.utf8)
             })
             oldReadFinished.fulfill()

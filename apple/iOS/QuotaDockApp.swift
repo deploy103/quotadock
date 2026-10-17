@@ -104,6 +104,7 @@ struct QuotaDockApp: App {
     @StateObject private var settings = InterfaceSettings()
     @State private var needsSetup = !SetupStore.load().completed
     @State private var initialRoute = SetupRoute.later
+    @State private var requestedAccountID: UUID?
     @Environment(\.scenePhase) private var scenePhase
     init() {
         #if DEBUG
@@ -140,11 +141,15 @@ struct QuotaDockApp: App {
                         needsSetup = false
                     }
                 } else {
-                    DockView(model: model, settings: settings, initialRoute: initialRoute)
+                    DockView(model: model, settings: settings, initialRoute: initialRoute,
+                             requestedAccountID: $requestedAccountID)
                 }
             }
                 .environment(\.locale, settings.locale)
                 .tint(DockTheme.mint)
+                .onOpenURL { url in
+                    if let id = AccountSurfaceSnapshot.accountID(from: url) { requestedAccountID = id }
+                }
                 .task(id: showingSetup) {
                     WatchSync.shared.start()
                     model.cloud.foreground = scenePhase == .active && !showingSetup
@@ -165,6 +170,7 @@ struct DockView: View {
     @ObservedObject var model: DockModel
     @ObservedObject var settings: InterfaceSettings
     var initialRoute = SetupRoute.later
+    @Binding var requestedAccountID: UUID?
     @State private var showPairing = false
     @State private var showSettings = false
     @State private var showAccounts = false
@@ -193,9 +199,13 @@ struct DockView: View {
                         Text(setupText("DEMO · sample data, not your account"))
                             .font(.subheadline).fontWeight(.semibold).foregroundStyle(DockTheme.mint)
                     }
-                    Text(DockL10n.text(DockL10n.text(model.status, table: "Setup")))
-                        .font(.subheadline).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if model.cloud.session == nil && !model.demo &&
+                        (model.snapshot == nil || !["Pair your HTTPS bridge or explore demo data.",
+                            "Updated · bridge may serve a cached reading."].contains(model.status)) {
+                        Text(DockL10n.text(DockL10n.text(model.status, table: "Setup")))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if model.cloud.session != nil && !model.demo {
                         CloudReadingsView(model: model.cloud)
                     } else if let snapshot = model.snapshot {
@@ -237,8 +247,9 @@ struct DockView: View {
                     }
                 }
                 .sheet(isPresented: $showPairing) { PairingView(model: model) }
-                .sheet(isPresented: $showAccounts) {
-                    CloudAccountsView(model: model.cloud).presentationDetents([.medium, .large])
+                .sheet(isPresented: $showAccounts, onDismiss: { requestedAccountID = nil }) {
+                    CloudAccountsView(model: model.cloud, requestedAccountID: requestedAccountID)
+                        .presentationDetents([.medium, .large])
                 }
                 .sheet(isPresented: $showSettings, onDismiss: {
                     if reviewAfterSettings { reviewAfterSettings = false; showSetup = true }
@@ -278,7 +289,14 @@ struct DockView: View {
                     showBatchPreview = ProcessInfo.processInfo.arguments.contains("--batch-preview")
                     showSurfacePreview = surfacePreview != nil
                     #endif
-                    if !openedInitialRoute { openedInitialRoute = true; open(initialRoute) }
+                    if !openedInitialRoute {
+                        openedInitialRoute = true
+                        if requestedAccountID != nil { showAccounts = true }
+                        else { open(initialRoute) }
+                    }
+                }
+                .onChange(of: requestedAccountID) { _, id in
+                    if id != nil { showAccounts = true }
                 }
         }
     }
@@ -398,4 +416,4 @@ struct PairingView: View {
     }
 }
 
-#Preview { DockView(model: { let model = DockModel(); model.demo = true; model.snapshot = .preview; return model }(), settings: InterfaceSettings()) }
+#Preview { DockView(model: { let model = DockModel(); model.demo = true; model.snapshot = .preview; return model }(), settings: InterfaceSettings(), requestedAccountID: .constant(nil)) }

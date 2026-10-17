@@ -86,6 +86,7 @@ struct CloudMe: Decodable {
     }
     struct Limits: Decodable {
         let accounts: Int?
+        let collectors: Int?
         let autoMinutes: Int
         let allowedAutoMinutes: [Int]
         let earlyBatchesPerDay: Int?
@@ -104,7 +105,8 @@ struct CloudMe: Decodable {
     static func decode(_ data: Data) throws -> Self {
         let value = try JSONDecoder().decode(Self.self, from: data)
         let intervals = value.tier == .free ? [120] : value.tier == .plus ? [60] : [20, 30, 60, 120]
-        guard value.limits.accounts == (value.tier == .free ? 3 : value.tier == .plus ? 10 : nil),
+        guard value.limits.accounts == (value.tier == .free ? 3 : value.tier == .plus ? 10 : 25),
+              value.limits.collectors == nil || value.limits.collectors == (value.tier == .free ? 1 : value.tier == .plus ? 3 : 5),
               value.limits.allowedAutoMinutes == intervals,
               intervals.contains(value.autoMinutes), value.autoMinutes == value.limits.autoMinutes,
               value.limits.live == (value.tier != .free),
@@ -220,7 +222,7 @@ struct CloudSnapshot: Codable {
         }
         return result
     }
-    // Small surfaces intentionally show only the first server-listed slot per provider.
+    // Legacy v1 only; configurable surfaces use accountSurfaceSnapshot(generation:).
     var smallSurfaceSnapshot: Snapshot {
         var seen = Set<ProviderID>()
         return Snapshot(schemaVersion: 1, generatedAt: generatedAt, demo: demo,
@@ -254,8 +256,8 @@ struct CloudSnapshot: Codable {
     }
 }
 
-// Full slot list is local to the iPhone. Only the reduced sanitized v1 projection
-// is exported to App Group / Watch. Neither cache contains a session or identity.
+// Full private slot cache stays on iPhone. Configurable surfaces receive a
+// sanitized UUID-aware v3 projection, never account labels, emails or credentials.
 enum CloudCache {
     static var directory: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -272,6 +274,7 @@ enum CloudCache {
               let data = try? snapshot.cacheData() else { return false }
         do {
             try files.save(data, kind: .cloud, in: directory, generation: generation, maximumBytes: 256 * 1024)
+            try SnapshotStore.saveAccounts(snapshot.accountSurfaceSnapshot(generation: generation))
             return true
         } catch { return false }
     }
@@ -805,6 +808,7 @@ struct CloudPagination {
 
 @MainActor
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+    static let cachedStatus = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
     let purchases = PurchasesModel()
     private let accountLabels = CloudAccountLabels()
     var labelScope: String? {
@@ -1269,7 +1273,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             if let next {
                 let cached = CloudCache.save(next, generation: generation)
                 onSnapshot?(next.smallSurfaceSnapshot)
-                status = "Cached server observations. Local collector required for new readings. Offline cache is limited to the first 50 slots if the full sanitized result exceeds 256 KiB; it is not a complete account list."
+                status = Self.cachedStatus
                 if !loadedIntent {
                     status = "Cached server observations. Refresh blocked until saved request recovery succeeds; retry reading or explicitly clear/sign out."
                 } else if !cached {
@@ -1546,8 +1550,9 @@ struct CloudReadingsView: View {
     var body: some View {
         let _ = locale
         VStack(alignment: .leading) {
-            Text(DockL10n.text(model.status)).font(.caption)
-            Text(model.me?.budget ?? "").font(.caption)
+            if model.status != CloudModel.cachedStatus {
+                Text(DockL10n.text(model.status)).font(.caption)
+            }
             if model.snapshot?.cachedSubset == true {
                 Text(DockL10n.text("Offline cache: first 50 slots only, not the complete account list. Original observation times retained.")).font(.caption)
             }
@@ -1557,7 +1562,6 @@ struct CloudReadingsView: View {
                     accountLabel: label.isEmpty ? String(account.id.uuidString.prefix(8)) : label)
                 if account.lastError != nil { Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption) }
             }
-            Text(DockL10n.text("Watch/widgets show the first server-listed account per provider only, from sanitized cache.")).font(.caption)
         }
     }
 }

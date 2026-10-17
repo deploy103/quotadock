@@ -104,7 +104,7 @@ final class ContractTests: XCTestCase {
         for (tier, cap, minutes, allowed, early, liveLimit) in [
             ("free", "3", 120, "[120]", "10", 0),
             ("plus", "10", 60, "[60]", "null", 5),
-            ("pro", "null", 20, "[20,30,60,120]", "null", 5)
+            ("pro", "25", 20, "[20,30,60,120]", "null", 5)
         ] {
             let json = """
             {"tier":"\(tier)","limits":{"accounts":\(cap),"autoMinutes":\(minutes),"allowedAutoMinutes":\(allowed),"earlyBatchesPerDay":\(early),"live":\(tier != "free")},"autoMinutes":\(minutes),"earlyBatchesUsed":2,"liveSessionsUsed":0,"liveSessionsLimit":\(liveLimit),"purchasesAvailable":false,"identity":"never display"}
@@ -116,6 +116,10 @@ final class ContractTests: XCTestCase {
             XCTAssertFalse(me.purchasesAvailable)
             XCTAssertEqual(me.tier.rawValue, tier)
             XCTAssertFalse(me.budget.contains("never display"))
+            let collectorCap = tier == "free" ? 1 : tier == "plus" ? 3 : 5
+            let collectors = json.replacingOccurrences(of: "\"accounts\":\(cap)", with: "\"accounts\":\(cap),\"collectors\":\(collectorCap)")
+            XCTAssertEqual(try CloudMe.decode(Data(collectors.utf8)).limits.collectors, collectorCap)
+            XCTAssertThrowsError(try CloudMe.decode(Data(collectors.replacingOccurrences(of: "\"collectors\":\(collectorCap)", with: "\"collectors\":99").utf8)))
             let enabled = json.replacingOccurrences(of: "\"purchasesAvailable\":false", with: "\"purchasesAvailable\":true")
             XCTAssertThrowsError(try CloudMe.decode(Data(enabled.utf8)))
             let bound = enabled.replacingOccurrences(of: "\"identity\":\"never display\"", with:
@@ -210,7 +214,7 @@ final class ContractTests: XCTestCase {
         let selected = [slots[4].id, slots[58].id]
         model.selectRefreshSlots(selected)
         let json = """
-        {"tier":"pro","limits":{"accounts":null,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
+        {"tier":"pro","limits":{"accounts":25,"collectors":5,"autoMinutes":20,"allowedAutoMinutes":[20,30,60,120],"earlyBatchesPerDay":null,"live":true},"autoMinutes":20,"earlyBatchesUsed":0,"liveSessionsUsed":0,"liveSessionsLimit":5,"purchasesAvailable":false}
         """
         model.me = try CloudMe.decode(Data(json.utf8))
         model.startLive()

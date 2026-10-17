@@ -2,30 +2,6 @@ import Foundation
 import WatchConnectivity
 import WidgetKit
 
-// A latest-value outbox, not a delivery acknowledgement. Only sanitized quota
-// bytes cross this boundary; activation always replaces memory with phone disk.
-struct WatchTransfer {
-    private(set) var pending: Data?
-
-    mutating func enqueue(_ snapshot: Snapshot) {
-        pending = Self.payload(snapshot)
-    }
-
-    mutating func reconcile(phoneSnapshot: Snapshot?, at date: Date = Date()) {
-        enqueue(phoneSnapshot ?? Snapshot(schemaVersion: 1, generatedAt: date,
-                                          demo: false, providers: []))
-    }
-
-    mutating func accepted() { pending = nil }
-
-    private static func payload(_ snapshot: Snapshot) -> Data? {
-        guard let data = try? snapshot.sanitized.encoded(),
-              data.count <= SnapshotStore.maximumPayloadBytes,
-              (try? Snapshot.decode(data)) != nil else { return nil }
-        return data
-    }
-}
-
 final class WatchSync: NSObject, WCSessionDelegate {
     static let shared = WatchSync()
     // Access only on the main queue, alongside the phone's cache mutations.
@@ -62,8 +38,25 @@ final class WatchSync: NSObject, WCSessionDelegate {
     private func flush(_ session: WCSession) {
         guard session.activationState == .activated, let data = transfer.pending else { return }
         do {
-            try session.updateApplicationContext(["snapshot": data,
-                                                  DockL10n.languageKey: DockL10n.selection().rawValue])
+            var context: [String: Any] = ["snapshot": data,
+                                         DockL10n.languageKey: DockL10n.selection().rawValue]
+            #if os(iOS)
+            guard let group = SnapshotStore.groupURL else { return }
+            let publisher = AccountSurfacePublisher(stateURL: group.appendingPathComponent("account-surface-publisher"))
+            // Only an explicitly selected bridge may publish UUID-less legacy
+            // authority. Missing/failed cloud cache must never become first-slot fallback.
+            let bridge = (try? ConnectionStore.current().mode) == .bridge
+            context["accountSurfaceV3"] = try publisher.next(snapshot: bridge ? nil : SnapshotStore.loadAccounts(),
+                legacy: bridge ? SnapshotStore.load() : nil)
+            // Bound the combined context as well as each versioned payload.
+            // If parallel v1 compatibility makes it too large, send an explicit
+            // sequenced unavailability rather than silently truncating UUIDs.
+            if try PropertyListSerialization.data(fromPropertyList: context, format: .binary, options: 0).count > SnapshotStore.maximumPayloadBytes {
+                context["accountSurfaceV3"] = try publisher.next(snapshot: nil)
+            }
+            #endif
+            guard try PropertyListSerialization.data(fromPropertyList: context, format: .binary, options: 0).count <= SnapshotStore.maximumPayloadBytes else { return }
+            try session.updateApplicationContext(context)
             transfer.accepted()
         } catch {
             // Keep the latest intention for a later send/activation; acceptance
@@ -83,22 +76,53 @@ final class WatchSync: NSObject, WCSessionDelegate {
     }
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         #if os(watchOS)
+        // Serialize disk fences and UI updates; a delayed legacy context must
+        // never replace an accepted UUID-aware authority.
+        onMain { self.receive(applicationContext) }
+        #endif
+    }
+    #if os(watchOS)
+    func trustCurrentCompanion() {
+        guard Thread.isMainThread, let inbox = SnapshotStore.accountInbox,
+              let data = WCSession.default.receivedApplicationContext["accountSurfaceV3"] as? Data else { return }
+        do { try inbox.trustPairedPublisher(data) } catch { /* Remain fenced on failed persistence. */ }
+        WidgetCenter.shared.reloadAllTimelines()
+        NotificationCenter.default.post(name: .snapshotUpdated, object: nil)
+    }
+    private func receive(_ applicationContext: [String: Any]) {
+        if let data = applicationContext["accountSurfaceV3"] as? Data {
+            guard let inbox = SnapshotStore.accountInbox else { return }
+            do { try inbox.receive(data) } catch {
+                WidgetCenter.shared.reloadAllTimelines()
+                NotificationCenter.default.post(name: .snapshotUpdated, object: nil)
+                return
+            }
+            // New Watch uses only sequence-fenced authority after this point.
+            // UUID-less quota is allowed only by an explicit bridge envelope.
+            applyLanguage(applicationContext)
+            WidgetCenter.shared.reloadAllTimelines()
+            NotificationCenter.default.post(name: .snapshotUpdated, object: nil)
+            return
+        }
+        guard SnapshotStore.accountInbox?.hasAuthority != true else { return }
         guard let data = applicationContext["snapshot"] as? Data,
               data.count <= SnapshotStore.maximumPayloadBytes,
               let snapshot = try? Snapshot.decode(data) else { return }
         // WCSession callbacks are not main-thread callbacks. Do not announce a
         // new cache (or reload widgets) if persistence failed, e.g. before unlock.
         do { try SnapshotStore.replaceFromCompanion(snapshot) } catch { return }
-        if let raw = applicationContext[DockL10n.languageKey] as? String,
-           let language = DockLanguage(rawValue: raw) {
-            DockL10n.save(language)
-        }
+        applyLanguage(applicationContext)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadAllTimelines()
             NotificationCenter.default.post(name: .snapshotUpdated, object: nil)
         }
-        #endif
     }
+    private func applyLanguage(_ context: [String: Any]) {
+        if let raw = context[DockL10n.languageKey] as? String, let language = DockLanguage(rawValue: raw) {
+            DockL10n.save(language)
+        }
+    }
+    #endif
     #if os(iOS)
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }

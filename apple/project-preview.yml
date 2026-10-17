@@ -21,6 +21,7 @@ targets:
       - iOS/PlanViews.swift
       - Shared/Snapshot.swift
       - Shared/CacheFiles.swift
+      - Shared/AccountSurface.swift
       - Shared/SnapshotStore.swift
       - Shared/QuotaViews.swift
       - Shared/ProviderIcon.swift

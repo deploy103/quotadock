@@ -1,5 +1,76 @@
 import SwiftUI
 
+// UUID selection never falls back to a different account or window.
+struct AccountSurfaceContent: View {
+    let snapshot: AccountSurfaceSnapshot?
+    let accountID: UUID?
+    let windowID: String
+    let date: Date
+    let surface: WidgetSurface
+    private var account: AccountSurfaceSnapshot.Account? { snapshot?.account(accountID) }
+    private var window: QuotaWindow? { snapshot?.window(account: accountID, windowID: windowID) }
+    private var freshness: String {
+        guard let reading = account?.reading, let observed = reading.observedAt else { return DockL10n.text("Not observed") }
+        return DockL10n.format("%@ · %@", DockL10n.text(reading.isStale(at: date) ? "Stale" : "Observed"), DockL10n.date(observed))
+    }
+    private var status: String {
+        DockL10n.text(account?.observedAt == nil ? "Not observed" : account?.reading.isStale(at: date) == true ? "Stale" : "Cached")
+    }
+    private var identifier: String { account.map { String($0.id.uuidString.prefix(8)) } ?? "—" }
+    var body: some View {
+        let value = window.flatMap(QuotaPresentation.percent) ?? DockL10n.text("Unknown")
+        Group {
+            if surface == .inline {
+                Group {
+                    if let account {
+                        Text("\(account.provider.displayName) \(value) · \(status) · \(String(identifier.prefix(4)))")
+                    } else {
+                        Text("\(DockL10n.text("Account unavailable")) · \(DockL10n.text("Unknown"))")
+                    }
+                }
+                .font(.caption).lineLimit(1).minimumScaleFactor(0.7)
+            } else if surface == .circular {
+                VStack(spacing: 1) {
+                    if let account { ProviderIcon(id: account.provider, size: 12) }
+                    Text(identifier).font(.system(size: 8)).lineLimit(1)
+                    Text(value).font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+                    Text(status).font(.system(size: 9))
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 3) {
+                        Text(account?.provider.displayName ?? DockL10n.text("Account unavailable")).bold()
+                        Spacer(minLength: 0)
+                        Text(identifier).monospaced()
+                    }.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
+                    if surface != .rectangular {
+                        Text(account?.plan ?? DockL10n.text("Plan unknown")).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 3) {
+                        Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(value).monospacedDigit().fixedSize()
+                    }.font(surface == .rectangular ? .caption2 : .caption)
+                    if let remaining = window?.clampedRemaining {
+                        ProgressView(value: remaining, total: 100).tint(DockTheme.mint).accessibilityHidden(true)
+                    }
+                    if surface != .rectangular, let reset = window?.resetsAt {
+                        Text(reset <= date ? DockL10n.text("Reset passed · awaiting observation") :
+                            DockL10n.format("Reset: %@", DockL10n.date(reset))).font(.system(size: 9))
+                    }
+                    Text(freshness).font(.system(size: 9)).foregroundStyle(.secondary)
+                    if surface != .rectangular {
+                        Text(DockL10n.text("Cached readings · not live")).font(.system(size: 9))
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint((account?.provider.displayName ?? DockL10n.text("Account unavailable")) + ". " +
+            (accountID.map { "account-" + $0.uuidString.lowercased() } ?? DockL10n.text("Choose account")) + ". " + freshness)
+    }
+}
+
 // Explicit layout keeps the same presentation usable outside WidgetKit.
 enum WidgetSurface { case small, medium, large, rectangular, circular, inline }
 

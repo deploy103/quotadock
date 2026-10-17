@@ -43,6 +43,7 @@ enum ConnectionStore {
             removed = removeFile(caches.appendingPathComponent("QuotaDock-cloud-snapshot.json")) && removed
         }
         removed = cleanup(.snapshot, in: SnapshotStore.directory) && removed
+        removed = cleanup(.accounts, in: SnapshotStore.directory) && removed
         removed = cleanup(.cloud, in: CloudCache.directory) && removed
         cleanupComplete = removed
         return next.generation

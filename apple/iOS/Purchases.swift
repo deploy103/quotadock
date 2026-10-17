@@ -5,7 +5,7 @@ import SwiftUI
 
 // Small contract values shared by the coordinator and its boundary tests.
 enum PurchasePolicy {
-    static let productIDs = ["com.quotadock.app.plus.monthly", "com.quotadock.app.pro.monthly"]
+    static let productIDs = BillingPolicy.productIDs
     static func eligible(productID: String, autoRenewable: Bool, verified: Bool,
                          owner: UUID?, account: UUID) -> Bool {
         verified && autoRenewable && productIDs.contains(productID) && owner == account
@@ -52,6 +52,7 @@ struct PurchaseContextIdentity: Equatable {
 @MainActor
 final class PurchasesModel: ObservableObject {
     @Published private(set) var products: [Product] = []
+    @Published private(set) var trialProductIDs: Set<String> = []
     @Published private(set) var busy = false
     @Published private(set) var status = "Purchases unavailable. Connect to a verified cloud account."
     @Published private(set) var available = false
@@ -81,7 +82,8 @@ final class PurchasesModel: ObservableObject {
                    onUnauthorized: @escaping () -> Void = {},
                    onVerified: @escaping () async -> Void) {
         let next: PurchaseContextIdentity?
-        if available, let client, let bearer = client.token, !bearer.isEmpty, let accountToken {
+        if available, let client, BillingPolicy.officialOrigin(client.baseURL),
+           let bearer = client.token, !bearer.isEmpty, let accountToken {
             next = PurchaseContextIdentity(baseURL: client.baseURL, bearer: bearer, accountToken: accountToken)
         } else { next = nil }
         let changed = next != identity
@@ -89,6 +91,7 @@ final class PurchasesModel: ObservableObject {
             revision += 1
             recovery?.cancel(); recovery = nil
             inFlight.removeAll(); newerUpdates.removeAll(); products = []; operations = 0; busy = false
+            trialProductIDs = []
             status = next == nil ? "Purchases unavailable. Connect to a verified cloud account." : "Load subscription products to purchase."
         }
         identity = next; self.client = next == nil ? nil : client
@@ -117,16 +120,39 @@ final class PurchasesModel: ObservableObject {
         do {
             let fetched = try await Product.products(for: PurchasePolicy.productIDs)
             guard current(value) else { return }
-            products = fetched.filter { PurchasePolicy.productIDs.contains($0.id) && $0.type == .autoRenewable
-                && $0.subscription?.subscriptionPeriod.unit == .month && $0.subscription?.subscriptionPeriod.value == 1 }
+            let supported = fetched.filter { product in
+                guard PurchasePolicy.productIDs.contains(product.id), product.type == .autoRenewable,
+                      let subscription = product.subscription else { return false }
+                guard BillingPolicy.tier(product.id) != "pro" || subscription.introductoryOffer == nil else { return false }
+                return subscription.subscriptionPeriod.value == 1 &&
+                    subscription.subscriptionPeriod.unit == (BillingPolicy.annual(product.id) ? .year : .month)
+            }
                 .sorted { $0.id < $1.id }
+            // A mismatched group is a configuration error, not another trial opportunity.
+            guard Set(supported.compactMap { $0.subscription?.subscriptionGroupID }).count <= 1 else {
+                products = []; trialProductIDs = []
+                status = "This subscription product is unavailable."; return
+            }
+            var trials: Set<String> = []
+            for product in supported {
+                if await offersTrial(product) { trials.insert(product.id) }
+                guard current(value) else { return }
+            }
+            products = supported; trialProductIDs = trials
             status = products.count == PurchasePolicy.productIDs.count ? "Subscription products available." : "Some subscription products are unavailable. Try again later."
         } catch {
             if current(value) { status = "Subscription products could not be loaded. Try again later." }
         }
     }
 
-    func purchase(_ product: Product) async {
+    private func offersTrial(_ product: Product) async -> Bool {
+        guard let subscription = product.subscription, let offer = subscription.introductoryOffer else { return false }
+        return BillingPolicy.offersTrial(productID: product.id, freeTrial: offer.paymentMode == .freeTrial,
+            monthUnit: offer.period.unit == .month, periodValue: offer.period.value,
+            periodCount: offer.periodCount, eligible: await subscription.isEligibleForIntroOffer)
+    }
+
+    func purchase(_ product: Product, promisedTrial: Bool = false) async {
         guard let identity, available, !busy else { return }
         guard PurchasePolicy.productIDs.contains(product.id), product.type == .autoRenewable,
               products.contains(where: { $0.id == product.id }) else {
@@ -135,7 +161,22 @@ final class PurchasesModel: ObservableObject {
         let value = revision
         begin(); defer { end(value) }
         do {
-            let result = try await product.purchase(options: [.appAccountToken(identity.accountToken)])
+            // Fetch fresh metadata as well as eligibility before honoring a displayed trial.
+            guard let fresh = try await Product.products(for: [product.id]).first,
+                  fresh.type == .autoRenewable, fresh.subscription?.subscriptionGroupID == product.subscription?.subscriptionGroupID,
+                  fresh.subscription?.subscriptionPeriod == product.subscription?.subscriptionPeriod,
+                  BillingPolicy.tier(fresh.id) != "pro" || fresh.subscription?.introductoryOffer == nil,
+                  fresh.price == product.price else {
+                if current(value) { status = "Subscription offer changed. Reload products before purchasing." }
+                return
+            }
+            let currentTrial = await offersTrial(fresh)
+            guard current(value) else { return }
+            guard BillingPolicy.mayPurchase(promisedTrial: promisedTrial, currentTrial: currentTrial) else {
+                trialProductIDs.remove(product.id)
+                status = "Subscription offer changed. Reload products before purchasing."; return
+            }
+            let result = try await fresh.purchase(options: [.appAccountToken(identity.accountToken)])
             guard current(value) else { return }
             switch result {
             case .success(let verification): await accept(verification)
@@ -251,11 +292,13 @@ struct SubscriptionsView: View {
     var body: some View {
         SubscriptionPanel(available: store.available, busy: store.busy, status: store.status,
             options: store.products.map { SubscriptionOption(id: $0.id, name: $0.displayName, price: $0.displayPrice,
-                tier: $0.id == PurchasePolicy.productIDs[0] ? "plus" : "pro") }, currentTier: currentTier,
+                tier: BillingPolicy.tier($0.id) ?? "", annual: BillingPolicy.annual($0.id),
+                trial: store.trialProductIDs.contains($0.id)) }, currentTier: currentTier,
             load: { Task { await store.loadProducts() } },
             purchase: { id in
                 guard let product = store.products.first(where: { $0.id == id }) else { return }
-                Task { await store.purchase(product) }
+                let promisedTrial = store.trialProductIDs.contains(id)
+                Task { await store.purchase(product, promisedTrial: promisedTrial) }
             }, restore: { Task { await store.restore() } })
     }
 }
@@ -290,8 +333,7 @@ struct SubscriptionsPreview: View {
                     status: state == "purchases-pending" ? "Verifying purchase. No paid entitlement applied before server confirmation." :
                         state == "purchases-error" ? "Server verification unconfirmed. Restore to retry. Last readings retained." :
                         state == "purchases-unavailable" ? "Purchases currently unavailable." : "Sample products and prices only. No payment is connected.",
-                    options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: DockL10n.text("₩3,990 sample"), tier: "plus"),
-                              SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: DockL10n.text("Price undecided"), tier: "pro")],
+                    options: [],
                     load: {}, purchase: { _ in }, restore: {})
             }.navigationTitle(DockL10n.text("Subscriptions"))
         }

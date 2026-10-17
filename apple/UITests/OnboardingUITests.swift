@@ -19,6 +19,32 @@ final class OnboardingUITests: XCTestCase {
         exerciseFirstRun(startKorean: true)
     }
 
+    func testPreferencesLastParagraphScrollsClearOfFooter() {
+        for korean in [false, true] {
+            app.launchArguments = ["--demo", "--reset-setup-test",
+                                   korean ? "--language-ko-preview" : "--language-en-preview"]
+            app.launch()
+            tap(app.buttons["setup-continue"])
+            tap(app.buttons["setup-route-demo"])
+            tap(app.buttons["setup-continue"])
+            let last = app.staticTexts[korean ?
+                "내 계정이 아닌 DEMO 데이터를 엽니다. 데모는 저장된 측정값을 덮어쓰지 않습니다." :
+                "You will open DEMO data, not your account. Demo never overwrites your saved observations."]
+            let footer = app.buttons["setup-continue"]
+            for _ in 0..<8 {
+                if last.exists && last.isHittable && last.frame.maxY <= footer.frame.minY { break }
+                app.swipeUp()
+            }
+            XCTAssertTrue(last.isHittable)
+            XCTAssertLessThanOrEqual(last.frame.maxY, footer.frame.minY,
+                                     "The final paragraph must scroll fully above the fixed footer")
+            XCTAssertTrue(footer.isHittable)
+            print("ONBOARDING FOOTER \(korean ? "ko" : "en") paragraph=\(last.frame) footer=\(footer.frame)")
+            capture(korean ? "KO-preferences-scrolled-bottom" : "EN-preferences-scrolled-bottom")
+            app.terminate()
+        }
+    }
+
     func testSetupOpensPairingAndSeparateUnacceptedCloudConsent() {
         app.launchArguments = ["--demo", "--reset-setup-test", "--language-en-preview"]
         app.launch()

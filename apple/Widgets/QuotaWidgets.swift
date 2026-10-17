@@ -91,6 +91,7 @@ struct OverviewWidget: Widget {
 @main
 struct QuotaWidgets: WidgetBundle {
     var body: some Widget {
+        AccountQuotaWidget()
         #if os(iOS)
         OverviewWidget()
         #endif

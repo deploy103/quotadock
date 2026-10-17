@@ -3,7 +3,7 @@ import Foundation
 // A generation is a logical invalidation fence, not a provider timestamp. Old
 // files can remain after failed cleanup without becoming readable quota again.
 struct CacheFiles {
-    enum Kind: String { case snapshot, cloud }
+    enum Kind: String { case snapshot, cloud, accounts }
     struct Entry {
         let data: Data
         let generation: UUID

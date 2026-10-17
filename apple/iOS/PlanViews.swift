@@ -5,12 +5,15 @@ struct SubscriptionOption: Identifiable {
     let name: String
     let price: String
     let tier: String
+    var annual: Bool = false
+    var trial: Bool = false
 }
 
 // Presentation only: prices and purchase eligibility are supplied by StoreKit.
 // The isolated preview can use this view without creating a purchase client.
 struct SubscriptionPanel: View {
     @Environment(\.locale) private var locale
+    @State private var annual = false
     let available: Bool
     let busy: Bool
     let status: String
@@ -26,39 +29,60 @@ struct SubscriptionPanel: View {
             Text(DockL10n.text(status)).font(.callout)
                 .accessibilityLabel(DockL10n.format("Subscription status: %@", DockL10n.text(status)))
         }
+        if !options.isEmpty {
+            Picker(DockL10n.text("Billing period"), selection: $annual) {
+                Text(DockL10n.text("Monthly")).tag(false)
+                Text(DockL10n.text("Annual")).tag(true)
+            }.pickerStyle(.segmented)
+        }
         Section {
             ForEach(["free", "plus", "pro"], id: \.self) { tier in
-                let option = options.first { $0.tier == tier }
                 let current = currentTier == tier
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text(option?.name ?? tier.capitalized).font(.title3.bold())
+                        Text(tier == "free" ? DockL10n.text("Free") : "QuotaDock \(tier.capitalized)").font(.title3.bold())
                         Spacer()
                         if current {
                             Text(DockL10n.text("Current plan"))
                                 .font(.caption.weight(.semibold)).foregroundStyle(DockTheme.mint)
                         }
                     }
-                    Text(tier == "free" ? DockL10n.text("Free") : option.map {
-                        DockL10n.format("%@ / month", $0.price)
-                    } ?? DockL10n.text("Price unavailable"))
-                        .font(.title2.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(DockL10n.text(tier == "free" ? "3 accounts · every 2 hours" :
-                            tier == "plus" ? "10 accounts · every hour" : "Unlimited accounts · every 20–120 minutes"))
-                        Text(DockL10n.text(tier == "free" ? "10 early refreshes / KST day" :
-                            tier == "plus" ? "5 Live sessions / subscription period" : "5 Live sessions / KST day"))
-                    }.font(.subheadline).foregroundStyle(.secondary)
-                    if available, tier != "free", let option {
-                        Button {
-                            purchase(option.id)
-                        } label: {
-                            Text(DockL10n.text(current ? "Current plan" : "Subscribe"))
-                                .frame(maxWidth: .infinity, minHeight: 32)
+                    Text(DockL10n.text(tier == "free" ? "3 accounts" : tier == "plus" ? "10 accounts" : "25 accounts"))
+                        .font(.headline)
+                    Text(DockL10n.text(tier == "free" ? "1 collector computer" : tier == "plus" ? "3 collector computers" : "5 collector computers"))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    if tier == "free" {
+                        Text(DockL10n.text("Free")).font(.title2.bold())
+                    } else if options.filter({ $0.tier == tier && $0.annual == annual }).isEmpty {
+                        Text(DockL10n.text("Price unavailable")).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(options.filter { $0.tier == tier && $0.annual == annual }) { option in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(DockL10n.format(option.annual ? "%@ / year" : "%@ / month", option.price))
+                                    .font(.title2.weight(.semibold))
+                                if option.trial && tier == "plus" {
+                                    Text(DockL10n.format(option.annual ?
+                                        "First month free, then %@ billed annually. Automatically renews." :
+                                        "First month free, then %@ billed monthly. Automatically renews.", option.price))
+                                        .font(.subheadline)
+                                    Text(DockL10n.text("One introductory offer per Apple subscription group."))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Text(DockL10n.text(option.annual ? "Billed annually. Automatically renews." : "Billed monthly. Automatically renews."))
+                                        .font(.subheadline)
+                                }
+                                if available {
+                                    Button { purchase(option.id) } label: {
+                                        Text(DockL10n.text(current ? "Review with Apple" :
+                                            option.trial && tier == "plus" ? "Start first month free" : "Subscribe"))
+                                            .frame(maxWidth: .infinity, minHeight: 32)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(busy)
+                                    .accessibilityIdentifier("subscribe-\(tier)-\(option.annual ? "annual" : "monthly")")
+                                }
+                            }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(current || busy || !available)
-                        .accessibilityIdentifier("subscribe-\(tier)")
                     }
                 }
                 .padding(.vertical, 8)
@@ -80,9 +104,7 @@ struct SubscriptionPanel: View {
                     Text(DockL10n.text(status)).font(.callout)
                         .accessibilityLabel(DockL10n.format("Subscription status: %@", DockL10n.text(status)))
                 }
-                Text(DockL10n.text("Subscriptions renew monthly and are charged to your Apple account. Cancel in Apple subscription settings before the next renewal. This does not sell additional AI provider usage. Deleting your cloud account does not cancel your Apple subscription."))
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(DockL10n.text("Up to 50 accounts per refresh batch. Live lasts up to 30 minutes. Collection timing is not guaranteed."))
+                Text(DockL10n.text("Subscriptions are charged to your Apple account and automatically renew. Cancel in Apple subscription settings before the next renewal. Deleting your cloud account does not cancel your Apple subscription."))
                     .font(.caption).foregroundStyle(.secondary)
                 Button(DockL10n.text("Reload products"), action: load).disabled(!available || busy)
                 Link(DockL10n.text("Manage Apple subscriptions"), destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
