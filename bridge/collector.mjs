@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { providers, snapshotFromRows, normalizeProvider } from './snapshot.mjs';
 
 // Never run a shell or accept provider commands over HTTP. Upstream logs stay private.
@@ -85,7 +86,7 @@ export async function collectAccounts(slots, bindings, { binary = 'codexbar', ti
   });
 }
 
-export function cachedCollector(load, { ttlMs = 60000, now = Date.now } = {}) {
+export function cachedCollector(load, { ttlMs = 60000, now = () => performance.now() } = {}) {
   let last = null, loadedAt = 0, pending = null;
   return async () => {
     if (last && now() - loadedAt < ttlMs) return last;

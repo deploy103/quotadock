@@ -99,6 +99,37 @@ test('concurrent readers share a cached reading until its TTL expires', async ()
   time = 60000; assert.deepEqual(await get(), { reading: 2 });
 });
 
+test('default cache clock expires by elapsed time even when Date.now moves backward', async t => {
+  let wallTime = Date.now(), calls = 0;
+  t.mock.method(Date, 'now', () => wallTime);
+  const stamp = '2026-10-13T09:01:02.000Z';
+  const get = cachedCollector(async () => { calls++; return demoSnapshot(new Date(stamp)); }, { ttlMs: 20 });
+  const first = await get();
+  wallTime -= 3600000;
+  // Use real elapsed time: mocking an injected clock would bypass the production default.
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const refreshed = await get();
+  assert.equal(calls, 2);
+  assert.notStrictEqual(refreshed, first);
+  assert.equal(refreshed.generatedAt, stamp);
+  assert.equal(refreshed.providers[0].observedAt, stamp);
+});
+
+test('concurrent load failures clear single-flight state so readers can retry', async () => {
+  const failed = Promise.withResolvers();
+  const error = new Error('load failed');
+  let calls = 0;
+  const get = cachedCollector(() => ++calls === 1 ? failed.promise : { reading: calls });
+  const failures = [get(), get()].map(result => assert.rejects(result, error));
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  failed.reject(error);
+  await Promise.all(failures);
+  assert.deepEqual(await Promise.all([get(), get()]), [{ reading: 2 }, { reading: 2 }]);
+  assert.equal(calls, 2);
+  assert.deepEqual(await get(), { reading: 2 });
+});
+
 test('init preserves an existing token and refuses insecure token file permissions', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'quotadock-token-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
