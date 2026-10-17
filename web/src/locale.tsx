@@ -3,7 +3,14 @@ import { useEffect, useState } from 'react';
 export type Language = 'en' | 'ko';
 type Preference = Language | 'system';
 const key = 'quotadock.language';
-const systemLanguage = (): Language => navigator.language.toLowerCase().split('-')[0] === 'ko' ? 'ko' : 'en';
+const systemLanguage = (): Language => {
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const locale of languages) {
+    const language = locale.toLowerCase().split('-')[0];
+    if (language === 'en' || language === 'ko') return language;
+  }
+  return 'en';
+};
 const valid = (value: string | null): Preference => value === 'en' || value === 'ko' ? value : 'system';
 const korean: Readonly<Record<string, string>> = { 'YOUR AI, AT A GLANCE': '내 AI 사용량을 한눈에', 'DEMO · SAMPLE DATA': 'DEMO · 예시 데이터', 'BRIDGE · ERROR': '브리지 · 오류', 'BRIDGE PAIRED': '브리지 연결됨', 'NOT CONNECTED': '연결되지 않음', 'STALE': '오래됨 · STALE', 'LIVE': '최근 관측' };
 export function useLanguage() {
@@ -13,7 +20,11 @@ export function useLanguage() {
   const language = preference === 'system' ? system : preference;
   useEffect(() => {
     const changed = () => setSystem(systemLanguage());
-    const stored = (event: StorageEvent) => { if (event.key === key || event.key === null) setPreference(valid(event.newValue)); };
+    const stored = (event: StorageEvent) => {
+      try {
+        if (event.storageArea === localStorage && (event.key === key || event.key === null)) setPreference(valid(event.newValue));
+      } catch { /* Storage access may be blocked; keep the current preference. */ }
+    };
     window.addEventListener('languagechange', changed); window.addEventListener('storage', stored);
     return () => { window.removeEventListener('languagechange', changed); window.removeEventListener('storage', stored); };
   }, []);
