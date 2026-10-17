@@ -27,7 +27,7 @@ final class OnboardingUITests: XCTestCase {
         tap(app.buttons["setup-continue"])
         let refresh = app.switches["setup-foreground-refresh"]
         reveal(refresh)
-        refresh.tap()
+        tapSwitch(refresh)
         XCTAssertEqual(refresh.value as? String, "0")
         tap(app.buttons["setup-continue"])
         XCTAssertTrue(app.navigationBars["Pair bridge"].waitForExistence(timeout: 5))
@@ -53,20 +53,18 @@ final class OnboardingUITests: XCTestCase {
         let connect = app.buttons["Connect with Apple"]
         reveal(connect)
         XCTAssertFalse(connect.isEnabled)
-        // A Form toggle exposes a full-width accessibility row; tap its
-        // native switch rather than the row's non-interactive label center.
-        tap(storage.switches.firstMatch)
+        tapSwitch(storage)
         XCTAssertEqual(storage.value as? String, "1")
         XCTAssertEqual(collector.value as? String, "0")
         XCTAssertFalse(connect.isEnabled, "One consent cannot authorize Apple sign-in")
-        tap(collector.switches.firstMatch)
+        tapSwitch(collector)
         XCTAssertEqual(collector.value as? String, "1")
         XCTAssertTrue(connect.isEnabled, "Both explicit consents must enable the sign-in action")
-        tap(storage.switches.firstMatch)
+        tapSwitch(storage)
         XCTAssertEqual(storage.value as? String, "0")
         XCTAssertEqual(collector.value as? String, "1")
         XCTAssertFalse(connect.isEnabled, "Withdrawing either consent must disable sign-in")
-        tap(collector.switches.firstMatch)
+        tapSwitch(collector)
         XCTAssertEqual(collector.value as? String, "0")
         capture("EN-setup-cloud-consent")
     }
@@ -89,7 +87,7 @@ final class OnboardingUITests: XCTestCase {
         let toggle = app.switches["setup-foreground-refresh"]
         reveal(toggle)
         XCTAssertEqual(toggle.value as? String, "1")
-        toggle.tap()
+        tapSwitch(toggle)
         XCTAssertEqual(toggle.value as? String, "0")
         capture(startKorean ? "KO-preferences" : "EN-preferences")
 
@@ -125,7 +123,7 @@ final class OnboardingUITests: XCTestCase {
         tap(app.buttons["setup-continue"])
         reveal(toggle)
         XCTAssertEqual(toggle.value as? String, "0")
-        toggle.tap() // Cancel must discard this change, not save it.
+        tapSwitch(toggle) // Cancel must discard this change, not save it.
         XCTAssertEqual(toggle.value as? String, "1")
         tap(app.buttons[korean ? "취소" : "Cancel"])
         XCTAssertTrue(demo.waitForExistence(timeout: 5))
@@ -193,6 +191,18 @@ final class OnboardingUITests: XCTestCase {
     private func tap(_ element: XCUIElement) {
         reveal(element)
         element.tap()
+    }
+
+    private func tapSwitch(_ element: XCUIElement) {
+        reveal(element)
+        // Form toggles wrap a native switch in a full-width accessibility row.
+        // On iOS 27 a synthesized instantaneous tap can leave it unchanged;
+        // deliberately press the current thumb, not the label or track center.
+        let nested = element.switches.firstMatch
+        let control = nested.exists ? nested : element
+        reveal(control)
+        let thumbX = control.value as? String == "1" ? 0.8 : 0.2
+        control.coordinate(withNormalizedOffset: CGVector(dx: thumbX, dy: 0.5)).press(forDuration: 0.3)
     }
 
     private func capture(_ name: String) {

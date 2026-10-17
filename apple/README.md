@@ -35,6 +35,68 @@ Before physical-device builds, set `DEVELOPMENT_TEAM`, `BUNDLE_PREFIX`, and `APP
 
 XcodeGen embeds the iOS widget and modern single-target Watch app into the iPhone app; the Watch app embeds its WidgetKit extension. Generated plists, entitlements and project are ignored. No ATS exceptions, background modes, push capability, or insecure certificate bypass are supplied. The shared iOS/watchOS app icon is an opaque 1024px rendering of `web/favicon.svg`. Release/App Store distribution additionally needs listing artwork, team provisioning and device/OS review.
 
+### Real simulator Keychain and process-relaunch verification
+
+Use a **disposable iPhone simulator**, never a physical phone or an existing
+installation containing useful authority. `NativePersistenceTests` replaces its
+connection with synthetic `.invalid` bridge/cloud credentials. The test executes
+the production Security.framework adapter and entitled App Group cache, without
+an Apple login, provider access or injected credential storage. Its ordinary
+in-process run restores prior language/refresh preferences, including absent
+values; its explicit multi-process phases intentionally preserve those values.
+
+When the global developer selection is Command Line Tools, export the Xcode path
+in **each shell invocation** (including the Python runner's environment), rather
+than changing the global selection. Do not update Xcode during a run; rebuild
+fresh products after an SDK/CoreSimulator change.
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcodebuild -version
+xcrun --find simctl
+# Set SIMULATOR_ID to a disposable simulator UUID from simctl's list.
+xcodebuild -project QuotaDock.xcodeproj -scheme QuotaDock \
+  -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+  -derivedDataPath DerivedData build-for-testing \
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES
+RUN=$(find DerivedData/Build/Products -maxdepth 1 -name '*.xctestrun')
+python3 verify-persistence.py --xctestrun "$RUN" \
+  --simulator-id "$SIMULATOR_ID" --output /tmp/quotadock-persistence-results
+```
+
+The output directory must not already exist. Each of ten phases launches a new
+host process and records its PID; a missing phase marker or reused consecutive
+PID fails the run. The phases cover both bridge/cloud switch directions, bearer
+rotation within one family, rejected-cloud observation retention, logout, legacy
+items with missing authority, and the persisted state left between fence advance
+and authority replacement. Real obsolete files are deliberately restored after
+cleanup to establish that generation checks—not deletion success—exclude them.
+Original fractional observation timestamps, stale versus unknown/non-demo data,
+language preference and sanitized Watch outbox payloads are checked after reads.
+No production launch hook or authentication bypass is added.
+
+On 2026-10-17, fresh Xcode 27.1 (27A9275) products on an iPhone 17/iOS 27.0
+simulator passed **97 native units, all ten separate-process persistence phases,
+and 22 cloud pagination/retry regressions with Korean selected**. All three
+EN↔KO/onboarding/consent UI flows passed separately, with their existing assertions
+and no retries. Synthetic switch interactions now deliberately press the native
+thumb for 0.3 seconds: instantaneous taps sometimes left the settled control OFF
+on this simulator. This is a test interaction change, not a production workaround.
+All 19 non-root portable contracts also passed. Mac verification corrected a
+`/var` versus `/private/var` test URL comparison and English-only budget assertions;
+no production storage defect was demonstrated. The iPhone build includes both
+WidgetKit extensions and the Watch app; independent unsigned Watch/widget builds
+also passed. No watchOS runtime was installed, so Watch runtime/delivery and
+system-widget installation were not established. An earlier run interrupted by
+an Xcode/CoreSimulator update is not counted as passing evidence.
+
+This is simulator persistence evidence, **not** device lock/file-protection,
+real Apple authorization, server revocation, actual HTTPS/provider collection,
+physical-device provisioning or Watch delivery evidence. The interrupted-switch
+state is constructed at the storage boundary, not an arbitrary instruction-level
+process kill. OS-rendered widgets and an offline Watch can still retain previously
+rendered content. Keep those signed-device release gates open.
+
 ## First-run setup · 첫 실행 설정
 
 These instructions describe feature-branch source, not `main` or a deployed release.

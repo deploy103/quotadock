@@ -253,7 +253,7 @@ final class CloudRetryTests: XCTestCase {
             XCTAssertEqual(model.slots.map(\.id), [slot])
             XCTAssertEqual(model.snapshot?.accounts.map(\.id), [slot])
             XCTAssertEqual(model.me?.earlyBatchesUsed, 2)
-            XCTAssertTrue(model.budget.contains("Free"))
+            XCTAssertTrue(model.budget.contains(DockL10n.text("Free")))
             XCTAssertTrue(model.status.contains("Refresh blocked"))
             // This should return before any transport or new intent creation.
             await model.refresh(force: false)

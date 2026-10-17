@@ -197,8 +197,9 @@ final class ConnectionStorageTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: unrelated), ownerA)
         XCTAssertEqual(try Data(contentsOf: files.file(.cloud, in: root, generation: first)), ownerA)
         let remaining = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-            .filter { $0.lastPathComponent.hasPrefix("snapshot-") && $0 != unrelated }
-        XCTAssertEqual(remaining, [files.file(.snapshot, in: root, generation: current)])
+            .map(\.lastPathComponent)
+            .filter { $0.hasPrefix("snapshot-") && $0 != unrelated.lastPathComponent }
+        XCTAssertEqual(remaining, [files.file(.snapshot, in: root, generation: current).lastPathComponent])
     }
 
     func testReadableUndeletableCacheIsExcludedByDurableFence() throws {

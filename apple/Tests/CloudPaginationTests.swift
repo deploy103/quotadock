@@ -213,7 +213,7 @@ final class CloudPaginationTests: XCTestCase {
         XCTAssertEqual(model.me?.tier, .free)
         XCTAssertEqual(model.me?.autoMinutes, 120)
         XCTAssertEqual(model.me?.earlyBatchesUsed, 7)
-        XCTAssertTrue(model.budget.hasPrefix("Free"))
+        XCTAssertTrue(model.budget.hasPrefix(DockL10n.text("Free")))
         XCTAssertTrue(model.budget.contains("7/10"))
         XCTAssertFalse(model.liveEnabled)
         XCTAssertNil(model.liveDeadline)
@@ -242,7 +242,7 @@ final class CloudPaginationTests: XCTestCase {
         defer { model.clear() }
         let enteredSnapshot = expectation(description: "Quota read suspended")
         let updatedBudget = expectation(description: "Pending entitlement budget published")
-        let observation = model.$budget.filter { $0.hasPrefix("Free") && $0.contains("7/10") }
+        let observation = model.$budget.filter { $0.hasPrefix(DockL10n.text("Free")) && $0.contains("7/10") }
             .sink { _ in updatedBudget.fulfill() }
         defer { observation.cancel() }
         var resumeSnapshot: CheckedContinuation<Void, Never>?
@@ -287,7 +287,7 @@ final class CloudPaginationTests: XCTestCase {
         await fulfillment(of: [updatedBudget], timeout: 2)
         XCTAssertEqual(model.me?.tier, .free)
         XCTAssertEqual(model.me?.earlyBatchesUsed, 7)
-        XCTAssertTrue(model.budget.hasPrefix("Free"))
+        XCTAssertTrue(model.budget.hasPrefix(DockL10n.text("Free")))
         XCTAssertTrue(model.budget.contains("7/10"))
         XCTAssertEqual(paths, ["v2/me", "v2/snapshot/page?limit=250", "v2/collectors", "v2/me"])
         XCTAssertEqual(model.slots.map(\.id), [uuid(1)])
@@ -306,7 +306,7 @@ final class CloudPaginationTests: XCTestCase {
         let oldReadFinished = expectation(description: "Account A read discarded")
         let newReadFinished = expectation(description: "Account B full read finished")
         let updatedBudget = expectation(description: "Account B coalesced budget published")
-        let observation = model.$budget.filter { $0.hasPrefix("Free") && $0.contains("9/10") }
+        let observation = model.$budget.filter { $0.hasPrefix(DockL10n.text("Free")) && $0.contains("9/10") }
             .sink { _ in updatedBudget.fulfill() }
         defer { observation.cancel() }
         var resumeMetadata: CheckedContinuation<Void, Never>?
@@ -403,7 +403,7 @@ final class CloudPaginationTests: XCTestCase {
         XCTAssertEqual(metadataReads, 2)
         XCTAssertEqual(model.me?.tier, .free)
         XCTAssertEqual(model.me?.earlyBatchesUsed, 9)
-        XCTAssertTrue(model.budget.hasPrefix("Free"))
+        XCTAssertTrue(model.budget.hasPrefix(DockL10n.text("Free")))
         XCTAssertTrue(model.budget.contains("9/10"))
         XCTAssertEqual(model.slots.map(\.id), [uuid(9)])
         XCTAssertEqual(model.snapshot?.accounts.map(\.id), [uuid(9)])
