@@ -33,19 +33,23 @@ struct AccountWatchContent: View {
                 }
                 AccountSurfaceContent(snapshot: snapshot, accountID: id, windowID: window,
                                       date: Date(), surface: .small)
-                if let snapshot {
-                    Text(DockL10n.format("Snapshot prepared on iPhone: %@", DockL10n.date(snapshot.generatedAt))).font(.caption2)
-                }
-                if let savedAt {
-                    Text(DockL10n.format("Saved on Watch: %@", DockL10n.date(savedAt))).font(.caption2)
-                }
-                Text(DockL10n.text("Works offline with saved data. Watch cannot fetch usage or sign in. Refresh on iPhone for new readings; transfer may be delayed and is not guaranteed."))
-                    .font(.caption2).foregroundStyle(.secondary)
-                Button(DockL10n.text("Reload local cache"), action: reloadCache)
-                Button(DockL10n.text("Trust paired iPhone")) { confirmTrust = true }
-                    .confirmationDialog(DockL10n.text("Replace cached account authority with this paired iPhone?"), isPresented: $confirmTrust) {
-                        Button(DockL10n.text("Trust paired iPhone"), role: .destructive, action: trustCompanion)
+                    .padding(10)
+                    .background(DockTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                DisclosureGroup(DockL10n.text("Connection settings")) {
+                    if let snapshot {
+                        Text(DockL10n.format("Snapshot prepared on iPhone: %@", DockL10n.date(snapshot.generatedAt))).font(.caption2)
                     }
+                    if let savedAt {
+                        Text(DockL10n.format("Saved on Watch: %@", DockL10n.date(savedAt))).font(.caption2)
+                    }
+                    Text(DockL10n.text("Works offline with saved data. Watch cannot fetch usage or sign in. Refresh on iPhone for new readings; transfer may be delayed and is not guaranteed."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Button(DockL10n.text("Reload local cache"), action: reloadCache)
+                    Button(DockL10n.text("Trust paired iPhone")) { confirmTrust = true }
+                        .confirmationDialog(DockL10n.text("Replace cached account authority with this paired iPhone?"), isPresented: $confirmTrust) {
+                            Button(DockL10n.text("Trust paired iPhone"), role: .destructive, action: trustCompanion)
+                        }
+                }.font(.caption)
             }
         }.background(DockTheme.graphite).tint(DockTheme.mint).preferredColorScheme(.dark)
     }
@@ -75,7 +79,16 @@ struct WatchContent: View {
                     if snapshot.providers.isEmpty {
                         Text(DockL10n.text("No provider readings in this snapshot. Refresh on iPhone."))
                     }
-                    if !demo && !snapshot.demo {
+                    ForEach(snapshot.providers) { ProviderCard(provider: $0, demo: snapshot.demo) }
+                } else {
+                    Text(DockL10n.text("No readable local cache"))
+                    Text(DockL10n.text("Pair with iPhone, refresh there, then open both apps. A cache may also be unavailable before the first unlock after restart."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text(DockL10n.text("First account per provider only")).font(.caption2).foregroundStyle(.secondary)
+                Button(DockL10n.text(demo ? "Leave demo" : "Explore demo"), action: toggleDemo)
+                DisclosureGroup(DockL10n.text("Connection settings")) {
+                    if let snapshot, !demo && !snapshot.demo {
                         Text(DockL10n.format("Snapshot prepared on iPhone: %@", DockL10n.date(snapshot.generatedAt)))
                             .font(.caption2).foregroundStyle(.secondary)
                         if let savedAt {
@@ -83,27 +96,21 @@ struct WatchContent: View {
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
-                    ForEach(snapshot.providers) { ProviderCard(provider: $0, demo: snapshot.demo) }
                     Text(DockL10n.text("Observed times belong to each provider. Stale readings are over 15 minutes old; missing observation times mean freshness is unknown."))
                         .font(.caption2).foregroundStyle(.secondary)
-                } else {
-                    Text(DockL10n.text("No readable local cache"))
-                    Text(DockL10n.text("Pair with iPhone, refresh there, then open both apps. A cache may also be unavailable before the first unlock after restart."))
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(DockL10n.text("Works offline with saved data. Watch cannot fetch usage or sign in. Refresh on iPhone for new readings; transfer may be delayed and is not guaranteed."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Button(DockL10n.text("Reload local cache"), action: reloadCache).disabled(demo)
+                    if let trustCompanion {
+                        Button(DockL10n.text("Trust paired iPhone")) { confirmTrust = true }
+                            .confirmationDialog(DockL10n.text("Replace cached account authority with this paired iPhone?"), isPresented: $confirmTrust) {
+                                Button(DockL10n.text("Trust paired iPhone"), role: .destructive, action: trustCompanion)
+                            }
+                    }
+                    Text(DockL10n.text("Reload only reads this Watch’s cache; it does not request an iPhone refresh."))
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
-                Text(DockL10n.text("Works offline with saved data. Watch cannot fetch usage or sign in. Refresh on iPhone for new readings; transfer may be delayed and is not guaranteed."))
-                    .font(.caption2).foregroundStyle(.secondary)
-                Text(DockL10n.text("First account per provider only")).font(.caption2).foregroundStyle(.secondary)
-                Button(DockL10n.text(demo ? "Leave demo" : "Explore demo"), action: toggleDemo)
-                Button(DockL10n.text("Reload local cache"), action: reloadCache).disabled(demo)
-                if let trustCompanion {
-                    Button(DockL10n.text("Trust paired iPhone")) { confirmTrust = true }
-                        .confirmationDialog(DockL10n.text("Replace cached account authority with this paired iPhone?"), isPresented: $confirmTrust) {
-                            Button(DockL10n.text("Trust paired iPhone"), role: .destructive, action: trustCompanion)
-                        }
-                }
-                Text(DockL10n.text("Reload only reads this Watch’s cache; it does not request an iPhone refresh."))
-                    .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption)
             }
         }.background(DockTheme.graphite).tint(DockTheme.mint).preferredColorScheme(.dark)
     }

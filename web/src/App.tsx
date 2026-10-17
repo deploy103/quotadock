@@ -114,7 +114,7 @@ function App() {
         const next = e.target.checked; setAuto(next);
         try { localStorage.setItem('quotadock.auto-refresh', String(next)); setAutoWarning(false); }
         catch { setAutoWarning(true); }
-      }} /> {t('자동 확인 · 60초')}</label></div><p id="auto-refresh-help" className="muted small">{t('자동 확인은 화면이 보일 때만 동작합니다. 끄면 수동으로만 확인합니다.')}</p>
+      }} /> {t('자동 확인 · 60초')}</label></div>
       {autoWarning && <p id="auto-refresh-warning" className="notice" role="status">{t('자동 확인 설정을 저장하지 못했습니다. 현재 페이지에서는 선택을 유지하지만 다시 열면 이전 설정으로 돌아갈 수 있습니다.')}</p>}
       <section id="providers" className="providers" aria-label={t('제공자별 남은 사용량')}>{providerIds.map(id => {
         const name = names[id], p = last?.providers.find(p => p.id === id), old = p?.state === 'available' && (failed || stale(p.observedAt)), sample = demo || last?.demo || p?.source === 'demo';
@@ -132,6 +132,7 @@ function App() {
             {id === 'codex' && <p className="provider-note">{t('Codex 허용량 · 전체 ChatGPT 사용량 아님. Free 지원은 화면·롤아웃에 따라 다르며 측정 불가는 알 수 없음입니다.')}</p>}{id === 'gemini' && <p className="provider-note">{t('모델 티어별 할당량 · 각 창을 따로 확인하세요')}</p>}
           </details>}</div></article>;
       })}</section>
+      <details className="refresh-help"><summary>{language === 'ko' ? '갱신 안내' : 'About refresh'}</summary><p id="auto-refresh-help" className="muted small">{t('자동 확인은 화면이 보일 때만 동작합니다. 끄면 수동으로만 확인합니다.')}</p></details>
       <div className="connection-tools" hidden={demo}><details ref={connectionDetails} id="connection-settings" className="connection" onToggle={event => setSettingsOpen(event.currentTarget.open)}><summary id="setup-title">{t('연결 설정')}</summary><p>{t('이 페이지와 같은 브리지 주소와 페어링 토큰을 입력하세요. AI 서비스 비밀번호가 아닙니다. HTTP는 로컬 루프백만 허용하며 토큰은 이 탭의 세션에만 저장됩니다.')}</p>
         <form id="connect-form" onSubmit={event => {
           event.preventDefault();

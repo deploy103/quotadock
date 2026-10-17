@@ -197,7 +197,7 @@ struct DockView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if model.demo || model.snapshot?.demo == true {
                         Text(setupText("DEMO · sample data, not your account"))
-                            .font(.subheadline).fontWeight(.semibold).foregroundStyle(DockTheme.mint)
+                            .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                     }
                     if model.cloud.session == nil && !model.demo &&
                         (model.snapshot == nil || !["Pair your HTTPS bridge or explore demo data.",
@@ -225,10 +225,13 @@ struct DockView: View {
                         model.snapshot = model.demo ? .preview : SnapshotStore.load()
                         if !model.demo && settings.foregroundAutoRefresh { Task { await model.refresh(automatic: true) } }
                     }
-                }.padding()
+                }
+                .padding(20)
+                .frame(maxWidth: 680)
+                .frame(maxWidth: .infinity)
             }.background(DockTheme.background)
                 .navigationTitle("QuotaDock")
-                .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.large)
                 .refreshable { await model.refresh() }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -334,18 +337,23 @@ struct SettingsView: View {
                 } footer: {
                     Text(setupText("When off, use the refresh button or pull to refresh. Connection failures retain the last observation and its time."))
                 }
-                Section(setupText("Widgets and Watch")) {
-                    Text(setupText("Widgets read only the last saved observations, without connecting to the server or AI accounts. The OS decides when they update."))
-                    Text(setupText("Watch shows the last observations transferred from iPhone."))
+                Section {
+                    DisclosureGroup(setupText("Widgets and Watch")) {
+                        Text(setupText("Widgets read only the last saved observations, without connecting to the server or AI accounts. The OS decides when they update."))
+                        Text(setupText("Watch shows the last observations transferred from iPhone."))
+                    }
+                    DisclosureGroup(setupText("Cloud auto collection")) {
+                        Text(setupText("Your local collector must be online. The server checks whether 2 hours (Free), 1 hour (Plus) or your selected 20, 30, 60 or 120 minutes (Pro) have passed. Turn off auto collection in the cloud screen."))
+                        Text(setupText("A collection interval does not guarantee iOS background execution or widget refreshes."))
+                    }
+                    DisclosureGroup("Codex") {
+                        Text(setupText("Free plan support varies by environment and rollout. Unavailable measurements mean Unknown, not exhausted allowance or confirmed ineligibility."))
+                    }
                 }
-                Section(setupText("Cloud auto collection")) {
-                    Text(setupText("Your local collector must be online. The server checks whether 2 hours (Free), 1 hour (Plus) or your selected 20, 30, 60 or 120 minutes (Pro) have passed. Turn off auto collection in the cloud screen."))
-                    Text(setupText("A collection interval does not guarantee iOS background execution or widget refreshes."))
-                }
-                Section("Codex") {
-                    Text(setupText("Free plan support varies by environment and rollout. Unavailable measurements mean Unknown, not exhausted allowance or confirmed ineligibility."))
-                }
-            }.navigationTitle(setupText("Settings"))
+            }
+                .scrollContentBackground(.hidden)
+                .background(DockTheme.background)
+                .navigationTitle(setupText("Settings"))
                 .toolbar { Button(setupText("Done")) { dismiss() } }
         }
     }

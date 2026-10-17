@@ -1549,7 +1549,7 @@ struct CloudReadingsView: View {
     @ObservedObject var model: CloudModel
     var body: some View {
         let _ = locale
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 16) {
             if model.status != CloudModel.cachedStatus {
                 Text(DockL10n.text(model.status)).font(.caption)
             }
@@ -1709,6 +1709,8 @@ struct CloudView: View {
                 NavigationLink(DockL10n.text("Plans")) { PlansView(model: model) }
             }
         }.navigationTitle(DockL10n.text("Optional cloud"))
+            .scrollContentBackground(.hidden)
+            .background(DockTheme.background)
             .sheet(isPresented: $showAccounts) {
                 CloudAccountsView(model: model).presentationDetents([.medium, .large])
             }

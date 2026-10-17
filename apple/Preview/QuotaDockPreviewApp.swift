@@ -29,9 +29,8 @@ struct PreviewNotice: View {
     var body: some View {
         let _ = locale
         Text(setupText("UI PREVIEW · sample data only"))
-            .font(.caption.weight(.semibold))
-            .frame(maxWidth: .infinity).padding(.vertical, 8)
-            .background(DockTheme.background)
+            .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier(identifier)
     }
 }
@@ -73,8 +72,6 @@ private struct PreviewDashboard: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     PreviewNotice(identifier: "preview-notice-dashboard")
-                    Text(setupText("DEMO · sample data, not your account"))
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(DockTheme.mint)
                     Picker(setupText("Sample state"), selection: $scenario) {
                         ForEach(SampleScenario.allCases, id: \.self) { state in
                             Text(setupText(state.rawValue)).tag(state)
@@ -89,11 +86,11 @@ private struct PreviewDashboard: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Text(setupText("This preview uses sample data only. Apple login, connections, purchases, widgets and Watch are not included."))
                         .font(.caption).foregroundStyle(.secondary)
-                }.padding(24).frame(maxWidth: 620).frame(maxWidth: .infinity)
+                }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity)
             }
             .background(DockTheme.background)
             .navigationTitle("QuotaDock")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
                     .accessibilityIdentifier("preview-settings")

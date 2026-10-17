@@ -21,7 +21,8 @@ struct AccountSurfaceContent: View {
     private var accessibilitySummary: String {
         let provider = account?.provider.displayName ?? DockL10n.text("Account unavailable")
         let selected = accountID.map { "account-" + $0.uuidString.lowercased() } ?? DockL10n.text("Choose account")
-        return "\(provider). \(selected). \(freshness)"
+        let period = window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")
+        return "\(provider). \(selected). \(period). \(freshness)"
     }
 
     var body: some View {
@@ -59,29 +60,31 @@ struct AccountSurfaceContent: View {
     }
 
     private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 3) {
+        VStack(alignment: .leading, spacing: surface == .small ? 6 : 3) {
+            HStack(spacing: 5) {
+                if let account { ProviderIcon(id: account.provider, size: 14) }
                 Text(account?.provider.displayName ?? DockL10n.text("Account unavailable")).bold()
                 Spacer(minLength: 0)
-                Text(identifier).monospaced()
+                Text(identifier).monospaced().foregroundStyle(.secondary)
             }.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
-            if surface != .rectangular {
+            if surface != .rectangular && surface != .medium {
                 Text(account?.plan ?? DockL10n.text("Plan unknown")).font(.caption2).foregroundStyle(.secondary)
             }
             HStack(spacing: 3) {
                 Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(value).monospacedDigit().fixedSize()
+                Text(value).font(surface == .small ? .title2.weight(.semibold) : .caption.weight(.semibold))
+                    .monospacedDigit().fixedSize()
             }.font(surface == .rectangular ? .caption2 : .caption)
             if let remaining = window?.clampedRemaining {
                 ProgressView(value: remaining, total: 100).tint(DockTheme.mint).accessibilityHidden(true)
             }
-            if surface != .rectangular, let reset = window?.resetsAt {
+            if surface != .rectangular && surface != .medium, let reset = window?.resetsAt {
                 Text(reset <= date ? DockL10n.text("Reset passed · awaiting observation") :
                     DockL10n.format("Reset: %@", DockL10n.date(reset))).font(.system(size: 9))
             }
             Text(freshness).font(.system(size: 9)).foregroundStyle(.secondary)
-            if surface != .rectangular {
+            if surface != .rectangular && surface != .medium {
                 Text(DockL10n.text("Cached readings · not live")).font(.system(size: 9))
             }
         }

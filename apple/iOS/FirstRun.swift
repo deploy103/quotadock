@@ -185,7 +185,7 @@ struct FirstRunView: View {
                             Text(setupText("Could not remember setup on this device. Retry or continue for this session; setup may appear again after restarting."))
                                 .font(.callout).foregroundStyle(.orange).accessibilityIdentifier("setup-save-error")
                         }
-                    }.padding(24).frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
+                    }.padding(20).frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .onChange(of: progress.step) { _, _ in scroll.scrollTo("setup-top", anchor: .top) }
             }
@@ -276,13 +276,20 @@ struct FirstRunView: View {
     }
 
     private func explanation(_ icon: String, _ title: String, _ detail: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon).font(.title3).frame(width: 26).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 7) {
-                Text(setupText(title)).font(.headline).fixedSize(horizontal: false, vertical: true)
-                Text(setupText(detail)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        DisclosureGroup {
+            Text(setupText(detail)).font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: icon).font(.title3).frame(width: 26).accessibilityHidden(true)
+                Text(setupText(title)).font(.headline).foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(16)
+        .background(DockTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+        .overlay { RoundedRectangle(cornerRadius: 20).stroke(DockTheme.border, lineWidth: 1) }
     }
 
     private func route(_ value: SetupRoute, icon: String, title: String, detail: String) -> some View {
@@ -298,12 +305,16 @@ struct FirstRunView: View {
                 Image(systemName: progress.route == value ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(progress.route == value ? DockTheme.mint : .secondary)
                     .accessibilityHidden(true)
-            }.padding(.vertical, 14).contentShape(Rectangle())
+            }.padding(18).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(progress.route == value ? [.isSelected] : [])
         .accessibilityIdentifier("setup-route-\(value.rawValue)")
-        .overlay(alignment: .bottom) { Divider() }
+        .background(DockTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(progress.route == value ? DockTheme.mint : DockTheme.border, lineWidth: 1)
+        }
     }
 
     private var actions: some View {
@@ -329,7 +340,7 @@ struct FirstRunView: View {
                     progress.route = .demo; progress.step = .preferences; remember(); headingFocused = true
                 }.accessibilityIdentifier("setup-explore-demo")
             }
-        }.padding(.horizontal, 24).padding(.vertical, 12)
+        }.padding(.horizontal, 20).padding(.vertical, 12)
             .frame(maxWidth: 620).frame(maxWidth: .infinity)
             .background(DockTheme.background)
     }

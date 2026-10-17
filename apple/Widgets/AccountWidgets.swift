@@ -84,21 +84,30 @@ private struct AccountQuotaView: View {
         case .accessoryInline: return .inline
         case .accessoryCircular: return .circular
         case .accessoryRectangular: return .rectangular
+        #if os(iOS)
+        case .systemMedium: return .medium
+        #endif
         default: return .small
         }
     }
     var body: some View {
-        HStack(alignment: .top) {
-            content(entry.configuration.account, window: entry.configuration.window)
+        Group {
             #if os(iOS)
             if family == .systemMedium {
-                Divider()
-                content(entry.configuration.comparison, window: entry.configuration.comparisonWindow)
+                VStack(alignment: .leading, spacing: 8) {
+                    content(entry.configuration.account, window: entry.configuration.window)
+                    Divider()
+                    content(entry.configuration.comparison, window: entry.configuration.comparisonWindow)
+                }
+            } else {
+                content(entry.configuration.account, window: entry.configuration.window)
             }
+            #else
+            content(entry.configuration.account, window: entry.configuration.window)
             #endif
         }
         .widgetURL(entry.configuration.account.flatMap { UUID(uuidString: $0.id) }.map(AccountSurfaceSnapshot.deepLink))
-        .containerBackground(DockTheme.background, for: .widget)
+        .containerBackground(DockTheme.surface, for: .widget)
     }
     @ViewBuilder private func content(_ account: SurfaceAccountEntity?, window: SurfaceWindow) -> some View {
         let id = account.flatMap { UUID(uuidString: $0.id) }

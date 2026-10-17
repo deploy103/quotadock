@@ -35,8 +35,8 @@ struct SubscriptionPanel: View {
                 Text(DockL10n.text("Annual")).tag(true)
             }.pickerStyle(.segmented)
         }
-        Section {
-            ForEach(["free", "plus", "pro"], id: \.self) { tier in
+        ForEach(["free", "plus", "pro"], id: \.self) { tier in
+            Section {
                 let current = currentTier == tier
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -85,14 +85,19 @@ struct SubscriptionPanel: View {
                         }
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DockTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+                .overlay { RoundedRectangle(cornerRadius: 20).stroke(DockTheme.border, lineWidth: 1) }
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("plan-\(tier)")
             }
-        } header: {
-            Text(DockL10n.text("Optional cloud"))
-        } footer: {
+        }
+        Section {
             Text(DockL10n.text("Fresh readings require an online local collector. AI provider subscriptions are separate."))
+                .font(.system(size: 13)).foregroundStyle(.secondary)
         }
         if available && options.isEmpty {
             Button(DockL10n.text("Reload products"), action: load).disabled(busy)

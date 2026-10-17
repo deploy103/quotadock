@@ -17,11 +17,18 @@ struct CloudAccountsView: View {
                     Section(DockL10n.text("Accounts")) {
                         ForEach(model.slots) { slot in
                             NavigationLink(value: slot.id) {
-                                HStack {
+                                HStack(spacing: 14) {
                                     ProviderIcon(id: slot.provider)
-                                    Text(model.accountTitle(slot.id, provider: slot.provider))
-                                        .fixedSize(horizontal: false, vertical: true)
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(model.accountTitle(slot.id, provider: slot.provider))
+                                            .font(.headline)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .privacySensitive()
+                                        Text(slot.provider.displayName)
+                                            .font(.system(size: 13)).foregroundStyle(.secondary)
+                                    }
                                 }
+                                .padding(.vertical, 6)
                             }
                         }
                         Menu {
@@ -49,8 +56,10 @@ struct CloudAccountsView: View {
                     NavigationLink(DockL10n.text("Plans")) { PlansView(model: model) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(DockTheme.background)
             .navigationTitle(DockL10n.text("Accounts"))
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: UUID.self) { id in
                 CloudAccountDetailsView(model: model, accountID: id)
             }
@@ -81,8 +90,11 @@ private struct CloudAccountDetailsView: View {
         Form {
             if let slot = model.slots.first(where: { $0.id == accountID }), model.session != nil {
                 Section {
-                    Text(DockL10n.format("Account %@", String(slot.id.uuidString.prefix(8))))
-                        .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        ProviderIcon(id: slot.provider)
+                        Text(model.accountTitle(slot.id, provider: slot.provider))
+                            .font(.title3.bold()).privacySensitive()
+                    }
                     CloudAccountLabelField(draft: model.accountLabel(slot.id)) {
                         model.setAccountLabel($0, id: slot.id)
                     }.id("\(model.labelScope ?? "")/\(slot.id)")
@@ -92,6 +104,8 @@ private struct CloudAccountDetailsView: View {
                 Section {
                     if let account = model.snapshot?.accounts.first(where: { $0.id == slot.id && $0.provider == slot.provider }) {
                         ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
                         if account.lastError != nil {
                             Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption)
                         }
@@ -155,6 +169,8 @@ private struct CloudAccountDetailsView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(DockTheme.background)
         .navigationTitle(DockL10n.text("Account"))
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: model.labelScope) { _, _ in
@@ -180,6 +196,7 @@ private struct CloudAccountLabelField: View {
         let _ = locale
         TextField(DockL10n.text("Account name or email"), text: $draft)
             .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .privacySensitive()
             .onChange(of: draft) { _, value in
                 let bounded = String(value.prefix(CloudAccountLabels.maximumLength))
                 if bounded != value { draft = bounded }
