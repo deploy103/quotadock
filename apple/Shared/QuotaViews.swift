@@ -105,6 +105,7 @@ struct ProviderCard: View {
     @Environment(\.locale) private var locale
     let provider: Provider
     let demo: Bool
+    var accountLabel: String? = nil
     var body: some View {
         let _ = locale
         VStack(alignment: .leading, spacing: 10) {
@@ -117,6 +118,9 @@ struct ProviderCard: View {
                     Text(DockL10n.text("DEMO")).font(.caption).foregroundStyle(DockTheme.mint)
                         .accessibilityLabel(DockL10n.text("Demo sample data"))
                 }
+            }
+            if let accountLabel {
+                Text(accountLabel).font(.subheadline)
             }
             Text(provider.plan.map { DockL10n.format("Plan: %@", $0) } ?? DockL10n.text("Plan unknown"))
                 .font(.subheadline).foregroundStyle(.secondary)

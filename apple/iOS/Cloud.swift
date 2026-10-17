@@ -806,6 +806,26 @@ struct CloudPagination {
 @MainActor
 final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     let purchases = PurchasesModel()
+    private let accountLabels = CloudAccountLabels()
+    var labelScope: String? {
+        guard let session, let authority = session.familyId ?? connectionGeneration else { return nil }
+        return CloudAccountLabels.scope(server: session.baseURL, authority: authority)
+    }
+    func accountLabel(_ id: UUID) -> String {
+        guard let labelScope else { return "" }
+        return accountLabels.label(scope: labelScope, slot: id)
+    }
+    func accountTitle(_ id: UUID, provider: ProviderID) -> String {
+        let label = accountLabel(id)
+        return "\(provider.displayName) · \(label.isEmpty ? String(id.uuidString.prefix(8)) : label)"
+    }
+    func setAccountLabel(_ value: String, id: UUID) {
+        guard let labelScope, slots.contains(where: { $0.id == id }) else { return }
+        objectWillChange.send()
+        if !accountLabels.set(value, scope: labelScope, slot: id) {
+            status = "Local account label limit reached. Clear an unused label first."
+        }
+    }
     var connectionGeneration = try? SnapshotStore.prepareGeneration()
     @Published var session = CloudSessionStore.load() {
         didSet {
@@ -1103,6 +1123,7 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     }
     @discardableResult
     func clear() -> Bool {
+        if let labelScope { accountLabels.remove(scope: labelScope) }
         var committed = false
         do { try ConnectionStore.select(.signedOut); committed = true }
         catch { /* Keep the process blocked if either persistent write failed. */ }
@@ -1282,6 +1303,9 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
             pendingEntitlementRead = false
             current = revision
             if method == "DELETE", path.hasPrefix("v2/accounts/") {
+                if let labelScope, let id = UUID(uuidString: String(path.dropFirst("v2/accounts/".count))) {
+                    accountLabels.set("", scope: labelScope, slot: id)
+                }
                 do {
                     guard let session else { throw SnapshotError.unpaired }
                     connectionGeneration = try ConnectionStore.select(.cloud, credential: CloudSessionStore.encoded(session))
@@ -1516,6 +1540,20 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     }
 }
 
+private struct CloudAccountLabelField: View {
+    @State var draft: String
+    let save: (String) -> Void
+    var body: some View {
+        TextField(DockL10n.text("Account name or email"), text: $draft)
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .onChange(of: draft) { _, value in
+                let bounded = String(value.prefix(CloudAccountLabels.maximumLength))
+                if bounded != value { draft = bounded }
+                save(bounded)
+            }
+    }
+}
+
 struct CloudReadingsView: View {
     @Environment(\.locale) private var locale
     @ObservedObject var model: CloudModel
@@ -1528,8 +1566,9 @@ struct CloudReadingsView: View {
                 Text(DockL10n.text("Offline cache: first 50 slots only, not the complete account list. Original observation times retained.")).font(.caption)
             }
             ForEach(model.snapshot?.accounts ?? []) { account in
-                Text("\(account.provider.displayName) · \(account.id.uuidString.prefix(8))").font(.caption)
-                ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
+                let label = model.accountLabel(account.id)
+                ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true,
+                    accountLabel: label.isEmpty ? String(account.id.uuidString.prefix(8)) : label)
                 if account.lastError != nil { Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption) }
             }
             Text(DockL10n.text("Watch/widgets show the first server-listed account per provider only, from sanitized cache.")).font(.caption)
@@ -1542,6 +1581,7 @@ struct CloudBatchView: View {
     let slots: [CloudAccount]
     let ids: [UUID]
     let locked: Bool
+    var label: (UUID) -> String = { _ in "" }
     let select: ([UUID]) -> Void
     var body: some View {
         let _ = locale
@@ -1557,7 +1597,7 @@ struct CloudBatchView: View {
                 })) {
                     HStack {
                         ProviderIcon(id: slot.provider)
-                        Text("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))")
+                        Text("\(slot.provider.displayName) · \(label(slot.id).isEmpty ? String(slot.id.uuidString.prefix(8)) : label(slot.id))")
                     }
                 }.disabled(locked || (!ids.contains(slot.id) && ids.count >= 50))
             }
@@ -1645,12 +1685,16 @@ struct CloudView: View {
                     ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.self) { Text($0.displayName).tag($0) }
                 }
                 Button(DockL10n.text("Add provider slot")) { Task { await model.mutate(path: "v2/accounts", method: "POST", body: ["provider": provider.rawValue]) } }.disabled(model.busy || model.liveEnabled || model.me == nil || model.me?.limits.accounts.map { model.slots.count >= $0 } == true)
-                CloudBatchView(slots: model.slots, ids: model.refreshSelection.ids, locked: model.busy || model.selectionLocked) { ids in
+                CloudBatchView(slots: model.slots, ids: model.refreshSelection.ids, locked: model.busy || model.selectionLocked, label: model.accountLabel) { ids in
                     model.selectRefreshSlots(ids)
                 }
+                Text(DockL10n.text("Only on this iPhone. Not sent to the server, Watch or widgets. Clear to remove.")).font(.caption)
                 ForEach(model.slots) { slot in
                     VStack(alignment: .leading) {
-                        Text("\(slot.provider.displayName) · \(slot.id.uuidString.prefix(8))")
+                        Text(model.accountTitle(slot.id, provider: slot.provider))
+                        CloudAccountLabelField(draft: model.accountLabel(slot.id)) {
+                            model.setAccountLabel($0, id: slot.id)
+                        }.id("\(model.labelScope ?? "")/\(slot.id)")
                         Text(slot.id.uuidString).font(.caption).textSelection(.enabled)
                         Button(DockL10n.text("Copy nonsecret slot UUID")) { UIPasteboard.general.string = slot.id.uuidString }
                         if let account = model.snapshot?.accounts.first(where: { $0.id == slot.id }) {
@@ -1690,7 +1734,9 @@ struct CloudView: View {
                 Button(DockL10n.text("Log out"), role: .destructive) { Task { await model.disconnect(delete: false) } }
                 Button(DockL10n.text("Delete cloud account and data"), role: .destructive) { confirmDelete = true }
             }
-            SubscriptionsView(store: model.purchases)
+            Section {
+                NavigationLink(DockL10n.text("Plans")) { PlansView(model: model) }
+            }
         }.navigationTitle(DockL10n.text("Optional cloud"))
             .onChange(of: base) { _, _ in
                 quotaStorageConsent = false; collectorProcessingConsent = false

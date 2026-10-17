@@ -4,6 +4,7 @@ import { BridgeHTTPError, demoSnapshot, fetchSnapshot, names, safeEndpoint } fro
 import type { Pairing, ProviderId, Snapshot } from './client';
 import { translate, useLanguage } from './locale';
 import { english, koreanWindows } from './translations';
+import { PlansPage } from './Plans';
 import '../style.css';
 
 const demo = new URLSearchParams(location.search).get('demo') === '1';
@@ -102,7 +103,7 @@ function App() {
     showSettings();
   }
   return <div className="shell">
-    <header className="masthead"><a className="brand" href="/">QuotaDock</a>{control}</header>
+    <header className="masthead"><a className="brand" href="/">QuotaDock</a><a href="/?view=plans">{t('요금제')}</a>{control}</header>
     <main><section className="intro" aria-labelledby="board-title"><div><span id="mode" className="badge">{t(demo || last?.demo ? 'DEMO · SAMPLE DATA' : pair ? failed ? 'BRIDGE · ERROR' : 'BRIDGE PAIRED' : 'NOT CONNECTED')}</span><h1 id="board-title">{t('남은 사용량')}</h1></div>
       <div className="actions"><button id="settings-toggle" className="secondary" hidden={demo} aria-controls="connection-settings" aria-expanded={settingsOpen} onClick={showSettings}>{t(pair ? '연결 설정' : '브리지 연결')}</button><button id="refresh" disabled={busy || (!pair && !demo)} onClick={() => demo ? setStatus('DEMO · 로컬 예시 데이터입니다') : void refresh()}>↻ {t('지금 새로고침')}</button></div></section>
       <div className="status-box"><p id="status" role="status" aria-live="polite">{t(status)}</p><p id="updated">{last ? `${t('스냅샷')} · ${date(last.generatedAt)} · ${t(demo ? '로컬 예시' : auto ? '화면이 보일 때 60초마다 확인' : '수동 확인')}` : t('아직 받은 데이터가 없습니다.')}</p></div>
@@ -159,4 +160,4 @@ function App() {
 }
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing dashboard root');
-createRoot(root).render(<App />);
+createRoot(root).render(new URLSearchParams(location.search).get('view') === 'plans' ? <PlansPage /> : <App />);

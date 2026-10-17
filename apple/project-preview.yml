@@ -18,6 +18,7 @@ targets:
     sources:
       - Preview/QuotaDockPreviewApp.swift
       - iOS/FirstRun.swift
+      - iOS/PlanViews.swift
       - Shared/Snapshot.swift
       - Shared/CacheFiles.swift
       - Shared/SnapshotStore.swift

@@ -41,6 +41,22 @@ Settings supports English/Korean and revisiting setup. A Personal Team installat
 normally needs re-signing after seven days. Actual widgets/Watch, Apple sign-in,
 StoreKit and provider collection remain production integration gates.
 
+## Plans and account labels
+
+Open **Settings → Plans** to compare Free, Plus and Pro. Prices come from
+StoreKit; the current-plan badge comes from the server, never a local selection.
+Unavailable products cannot be purchased. Renewal terms stay in an expandable
+section; restore remains accessible. The isolated preview shares only this
+presentation, with purchases disabled. The workstation browser has a read-only
+comparison at `/?view=plans`; its ₩3,990 Plus price is a release target, not an offer.
+
+Cloud slots accept a manually entered **Account name or email**. Labels are not
+verified provider identities. They stay in private iPhone preferences, scoped to
+the server, login family and slot, and are absent from uploads, shared caches,
+Watch/widgets and logs. Logout/account deletion clears the current scope; removing
+a slot clears its label. Token renewal retains labels; a new login family does
+not inherit them. Legacy sessions use the connection generation instead.
+
 ## Generate, build and test on a Mac
 
 ```sh

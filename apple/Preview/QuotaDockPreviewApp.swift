@@ -104,6 +104,14 @@ private struct PreviewDashboard: View {
                 Form {
                     PreviewNotice(identifier: "preview-notice-settings")
                     InterfaceLanguagePicker(settings: settings)
+                    NavigationLink(DockL10n.text("Plans")) {
+                        Form {
+                            PreviewNotice(identifier: "preview-notice-plans")
+                            SubscriptionPanel(available: false, busy: false,
+                                status: "Sample products and prices only. No payment is connected.",
+                                options: [], currentTier: "free", load: {}, purchase: { _ in }, restore: {})
+                        }.navigationTitle(DockL10n.text("Plans"))
+                    }
                     Toggle(setupText("Refresh when I open the app"), isOn: Binding(
                         get: { settings.foregroundAutoRefresh },
                         set: { settings.chooseForegroundRefresh($0) }

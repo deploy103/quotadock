@@ -245,65 +245,34 @@ final class PurchasesModel: ObservableObject {
     }
 }
 
-struct SubscriptionOption: Identifiable {
-    let id: String
-    let name: String
-    let price: String
-}
-
-// Prices come from StoreKit. This panel only displays offers; it never grants a tier.
-struct SubscriptionPanel: View {
-    @Environment(\.locale) private var locale
-    let available: Bool
-    let busy: Bool
-    let status: String
-    let options: [SubscriptionOption]
-    let load: () -> Void
-    let purchase: (String) -> Void
-    let restore: () -> Void
-    var body: some View {
-        let _ = locale
-        Section(DockL10n.text("QuotaDock subscriptions")) {
-            Text(DockL10n.text(status)).font(.callout).accessibilityLabel(DockL10n.format("Subscription status: %@", DockL10n.text(status)))
-            if available {
-                ForEach(options) { option in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(option.name).font(.headline)
-                        Text(DockL10n.text(option.id == PurchasePolicy.productIDs[0] ?
-                            "10 accounts · hourly · 5 Live sessions per subscription period" :
-                            "Unlimited account registration · 20–120 minutes · 5 Live sessions per KST day"))
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button(DockL10n.format("%@ / month · Subscribe to %@", option.price, option.name)) { purchase(option.id) }
-                            .disabled(busy)
-                    }.padding(.vertical, 4)
-                }
-                if options.isEmpty { Text(DockL10n.text("Load products from Apple to see prices.")).font(.caption) }
-            } else {
-                Text(DockL10n.text("Apple sign-in, server verification configuration and App Store products are required. Purchases are currently unavailable."))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Button(DockL10n.text("Reload products"), action: load).disabled(!available || busy)
-            Button(DockL10n.text("Restore purchases"), action: restore).disabled(!available || busy)
-            if busy { ProgressView(DockL10n.text("Processing · no entitlement applied before server confirmation.")) }
-            Text(DockL10n.text("Subscriptions renew monthly and are charged to your Apple account. Cancel in Apple subscription settings before the next renewal. This does not sell additional AI provider usage. Deleting your cloud account does not cancel your Apple subscription."))
-                .font(.caption).foregroundStyle(.secondary)
-            Link(DockL10n.text("Manage Apple subscriptions"), destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
-            Link(DockL10n.text("Privacy and data"), destination: URL(string: "https://usage.mvtp.cloud/#privacy")!)
-            Link(DockL10n.text("Standard terms (Apple EULA)"), destination: URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!)
-        }
-    }
-}
-
 struct SubscriptionsView: View {
     @ObservedObject var store: PurchasesModel
+    var currentTier: String? = nil
     var body: some View {
         SubscriptionPanel(available: store.available, busy: store.busy, status: store.status,
-            options: store.products.map { SubscriptionOption(id: $0.id, name: $0.displayName, price: $0.displayPrice) },
+            options: store.products.map { SubscriptionOption(id: $0.id, name: $0.displayName, price: $0.displayPrice,
+                tier: $0.id == PurchasePolicy.productIDs[0] ? "plus" : "pro") }, currentTier: currentTier,
             load: { Task { await store.loadProducts() } },
             purchase: { id in
                 guard let product = store.products.first(where: { $0.id == id }) else { return }
                 Task { await store.purchase(product) }
             }, restore: { Task { await store.restore() } })
+    }
+}
+
+struct PlansView: View {
+    @ObservedObject var model: CloudModel
+    var body: some View {
+        Form {
+            SubscriptionsView(store: model.purchases, currentTier: model.me?.tier.rawValue)
+        }
+        .navigationTitle(DockL10n.text("Plans"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if model.purchases.available && model.purchases.products.isEmpty {
+                await model.purchases.loadProducts()
+            }
+        }
     }
 }
 
@@ -321,8 +290,8 @@ struct SubscriptionsPreview: View {
                     status: state == "purchases-pending" ? "Verifying purchase. No paid entitlement applied before server confirmation." :
                         state == "purchases-error" ? "Server verification unconfirmed. Restore to retry. Last readings retained." :
                         state == "purchases-unavailable" ? "Purchases currently unavailable." : "Sample products and prices only. No payment is connected.",
-                    options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: DockL10n.text("₩3,990 sample")),
-                              SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: DockL10n.text("Price undecided"))],
+                    options: [SubscriptionOption(id: PurchasePolicy.productIDs[0], name: "Plus", price: DockL10n.text("₩3,990 sample"), tier: "plus"),
+                              SubscriptionOption(id: PurchasePolicy.productIDs[1], name: "Pro", price: DockL10n.text("Price undecided"), tier: "pro")],
                     load: {}, purchase: { _ in }, restore: {})
             }.navigationTitle(DockL10n.text("Subscriptions"))
         }

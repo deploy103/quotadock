@@ -6,6 +6,42 @@ import XCTest
 #endif
 
 final class ConnectionStorageTests: XCTestCase {
+    func testPrivateAccountLabels() throws {
+        let suite = "QuotaDock-label-test-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let labels = CloudAccountLabels(defaults: defaults)
+        let authority = UUID(), slot = UUID()
+        let a = CloudAccountLabels.scope(server: URL(string: "https://one.example")!, authority: authority)
+        let b = CloudAccountLabels.scope(server: URL(string: "https://two.example")!, authority: authority)
+        let c = CloudAccountLabels.scope(server: URL(string: "https://one.example")!, authority: UUID())
+        XCTAssertTrue(labels.set("  work@example.test  ", scope: a, slot: slot))
+        let reopened = CloudAccountLabels(defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
+        XCTAssertEqual(reopened.label(scope: a, slot: slot), "work@example.test")
+        XCTAssertEqual(reopened.label(scope: b, slot: slot), "")
+        XCTAssertEqual(reopened.label(scope: c, slot: slot), "")
+        XCTAssertEqual(reopened.label(scope: a, slot: UUID()), "")
+        XCTAssertTrue(labels.set(String(repeating: "한", count: 200), scope: a, slot: slot))
+        XCTAssertEqual(labels.label(scope: a, slot: slot).count, 120)
+        XCTAssertTrue(labels.set("\n\t  ", scope: a, slot: slot))
+        XCTAssertEqual(reopened.label(scope: a, slot: slot), "")
+        XCTAssertTrue(labels.set("a\n\u{202E}b", scope: a, slot: slot))
+        XCTAssertEqual(labels.label(scope: a, slot: slot), "ab")
+        let otherSlots = (1..<CloudAccountLabels.maximumEntries).map { _ in UUID() }
+        for id in otherSlots {
+            XCTAssertTrue(labels.set("name", scope: a, slot: id))
+        }
+        XCTAssertFalse(labels.set("overflow", scope: b, slot: slot))
+        XCTAssertTrue(labels.set("updated", scope: a, slot: slot))
+        XCTAssertTrue(labels.set("", scope: a, slot: slot))
+        XCTAssertTrue(labels.set("room again", scope: b, slot: slot))
+        labels.remove(scope: a)
+        XCTAssertEqual(reopened.label(scope: a, slot: slot), "")
+        XCTAssertEqual(reopened.label(scope: a, slot: otherSlots[0]), "")
+        XCTAssertEqual(reopened.label(scope: b, slot: slot), "room again")
+        XCTAssertTrue(labels.set("new name", scope: c, slot: slot))
+    }
+
     private var root: URL!
     private var files: CacheFiles!
     private let ownerA = Data("synthetic-cloud-A".utf8)

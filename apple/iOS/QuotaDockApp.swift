@@ -234,7 +234,7 @@ struct DockView: View {
                 .sheet(isPresented: $showSettings, onDismiss: {
                     if reviewAfterSettings { reviewAfterSettings = false; showSetup = true }
                 }) {
-                    SettingsView(settings: settings) { reviewAfterSettings = true; showSettings = false }
+                    SettingsView(settings: settings, cloud: model.cloud) { reviewAfterSettings = true; showSettings = false }
                 }
                 .fullScreenCover(isPresented: $showSetup, onDismiss: {
                     if let route = pendingRoute { pendingRoute = nil; open(route) }
@@ -286,12 +286,16 @@ struct DockView: View {
 
 struct SettingsView: View {
     @ObservedObject var settings: InterfaceSettings
+    @ObservedObject var cloud: CloudModel
     let reviewSetup: () -> Void
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             Form {
                 Section(setupText("Language")) { InterfaceLanguagePicker(settings: settings) }
+                Section {
+                    NavigationLink(DockL10n.text("Plans")) { PlansView(model: cloud) }
+                }
                 Section {
                     Button(setupText("Review setup"), action: reviewSetup)
                 } footer: {

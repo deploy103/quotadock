@@ -305,6 +305,26 @@ retained erasure journal. A restored instance must stay closed if that evidence
 is unavailable. This is a release gate, not an implemented recovery automation;
 shared-database restore or invalidation requires separate operator approval.
 
+## Workstation-first plan screen and account labels — 17 October 2026
+
+The owner stopped Mac/device work after manually trusting and opening the isolated
+QD Preview app. Its physical UI assertions did not run; runner compilation is not
+runtime acceptance. No later workstation change is installed on that phone.
+
+Settings and cloud management now link to a dedicated Free/Plus/Pro screen. Real
+prices remain StoreKit-owned and paid status remains server-owned. The browser
+comparison is read-only and explicitly labels release targets, not live offers.
+User-entered cloud slot names/emails stay phone-private and are never added to
+collector payloads, App Group snapshots or Watch transfers.
+
+Workstation checks: production web build, 30 Chromium browser tests, 24 bridge
+tests (one root-only test skipped), and 20 non-root Foundation tests passed.
+The final pricing render also passed the targeted browser test after its disabled
+control contrast was improved. EN/KO at 320/390/1440 pixels and expanded terms were
+inspected. Swift frontend syntax checks are not iOS SDK typechecking or a native
+render: both remain required for these new Apple UI changes. Existing real-provider,
+widget/Watch, StoreKit, recovery and eligible Apple Team gates below remain open.
+
 ## Release sequence and required evidence
 
 | Stage | Exit evidence | Current gate |

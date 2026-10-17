@@ -350,3 +350,40 @@ test('demo desktop/mobile appearance, icons and unknown Grok', async ({ page }) 
   expect(await page.getByRole('progressbar').evaluateAll(bars => bars.map(bar => (bar as HTMLProgressElement).value))).toEqual([72, 91, 84, 63, 88, 96]);
   if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/dashboard-demo-ko-320-root-200.png', fullPage: true });
 });
+
+test('plans stay read-only, bilingual and concise without collecting paired quota', async ({ page }) => {
+  const quotaRequests: string[] = [];
+  page.on('request', request => { if (request.url().includes('/v1/snapshot')) quotaRequests.push(request.url()); });
+  await page.addInitScript(() => {
+    sessionStorage.setItem('quotadock.endpoint', location.origin);
+    sessionStorage.setItem('quotadock.token', 'a'.repeat(64));
+  });
+  await page.goto('/?view=plans');
+  for (const width of [390, 320, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const language of ['ko', 'en']) {
+      await page.locator('header select').selectOption(language);
+      await expect(page.getByRole('heading', { name: language === 'ko' ? '요금제' : 'Plans', exact: true })).toBeVisible();
+      await expect(page.getByRole('article')).toHaveCount(3);
+      await expect(page.getByRole('article', { name: 'Plus', exact: true })).toContainText('3,990');
+      await expect(page.getByRole('article', { name: 'Pro', exact: true })).toContainText(language === 'ko' ? '가격 미정' : 'Price undecided');
+      await expect(page.getByRole('button')).toHaveCount(2);
+      for (const button of await page.getByRole('button').all()) await expect(button).toBeDisabled();
+      await expect(page.locator('.plan-terms')).not.toHaveAttribute('open');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      if (process.env.CAPTURE_PLANS) await page.screenshot({ path: `.amp/in/artifacts/plans-${language}-${width}.png`, fullPage: true });
+    }
+  }
+  await page.locator('header select').selectOption('ko');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.plan-terms summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('개인정보', { exact: true })).toBeVisible();
+  await expect(page.locator('.plan-terms')).toContainText('최대 50계정');
+  if (process.env.CAPTURE_PLANS) await page.screenshot({ path: '.amp/in/artifacts/plans-ko-details-390.png', fullPage: true });
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(quotaRequests).toEqual([]);
+  await page.getByRole('link', { name: '← 사용량 보드' }).click();
+  await expect(page.getByRole('link', { name: '요금제', exact: true })).toBeVisible();
+});

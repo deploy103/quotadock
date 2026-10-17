@@ -12,12 +12,13 @@ let package = Package(
             "PortableTests", "Preview", "README.md", "project.yml", "project-preview.yml", "verify-persistence.py",
             "iOS/ConnectionStore.swift",
             "iOS/Cloud.swift", "iOS/FirstRun.swift", "iOS/Purchases.swift",
+            "iOS/PlanViews.swift",
             "iOS/QuotaAccessibilityPreview.swift", "iOS/QuotaDockApp.swift",
             "iOS/WatchSurfacePreview.swift", "iOS/WidgetSurfacePreview.swift",
             "Shared/Localization.swift", "Shared/ProviderIcon.swift",
             "Shared/QuotaViews.swift", "Shared/SnapshotStore.swift", "Shared/WatchContent.swift",
             "Shared/WatchSync.swift", "Shared/WidgetContent.swift"
-        ], sources: ["Shared/Snapshot.swift", "Shared/CacheFiles.swift", "Shared/Bridge.swift", "iOS/ConnectionState.swift"]),
+        ], sources: ["Shared/Snapshot.swift", "Shared/CacheFiles.swift", "Shared/Bridge.swift", "iOS/ConnectionState.swift", "iOS/CloudAccountLabels.swift"]),
         .testTarget(name: "QuotaDockStorageTests", dependencies: ["QuotaDockStorage"], path: "PortableTests")
     ]
 )
