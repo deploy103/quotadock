@@ -49,16 +49,15 @@ struct SubscriptionPanel: View {
                         Text(DockL10n.text(tier == "free" ? "10 early refreshes / KST day" :
                             tier == "plus" ? "5 Live sessions / subscription period" : "5 Live sessions / KST day"))
                     }.font(.subheadline).foregroundStyle(.secondary)
-                    if tier != "free" {
+                    if available, tier != "free", let option {
                         Button {
-                            if let option { purchase(option.id) }
+                            purchase(option.id)
                         } label: {
-                            Text(DockL10n.text(current ? "Current plan" :
-                                available && option != nil ? "Subscribe" : "Not available yet"))
+                            Text(DockL10n.text(current ? "Current plan" : "Subscribe"))
                                 .frame(maxWidth: .infinity, minHeight: 32)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(current || busy || !available || option == nil)
+                        .disabled(current || busy || !available)
                         .accessibilityIdentifier("subscribe-\(tier)")
                     }
                 }

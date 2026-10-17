@@ -167,6 +167,7 @@ struct DockView: View {
     var initialRoute = SetupRoute.later
     @State private var showPairing = false
     @State private var showSettings = false
+    @State private var showAccounts = false
     @State private var showSetup = false
     @State private var reviewAfterSettings = false
     @State private var pendingRoute: SetupRoute?
@@ -220,17 +221,25 @@ struct DockView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .refreshable { await model.refresh() }
                 .toolbar {
-                    Button(setupText("Refresh"), systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-                        .disabled(model.busy || model.demo)
-                    Menu {
-                        Button(setupText("Pair"), systemImage: "link") { showPairing = true }
-                        NavigationLink(setupText("Optional cloud account")) { CloudView(model: model.cloud) }
-                    } label: {
-                        Label(DockL10n.text("Connections"), systemImage: "link")
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(DockL10n.text("Accounts"), systemImage: "person.crop.circle") { showAccounts = true }
                     }
-                    Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button(setupText("Refresh"), systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+                            .disabled(model.busy || model.demo)
+                        Menu {
+                            Button(setupText("Pair"), systemImage: "link") { showPairing = true }
+                            NavigationLink(setupText("Optional cloud account")) { CloudView(model: model.cloud) }
+                        } label: {
+                            Label(DockL10n.text("Connections"), systemImage: "link")
+                        }
+                        Button(setupText("Settings"), systemImage: "gearshape") { showSettings = true }
+                    }
                 }
                 .sheet(isPresented: $showPairing) { PairingView(model: model) }
+                .sheet(isPresented: $showAccounts) {
+                    CloudAccountsView(model: model.cloud).presentationDetents([.medium, .large])
+                }
                 .sheet(isPresented: $showSettings, onDismiss: {
                     if reviewAfterSettings { reviewAfterSettings = false; showSetup = true }
                 }) {

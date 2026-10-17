@@ -12,7 +12,7 @@ let package = Package(
             "PortableTests", "Preview", "README.md", "project.yml", "project-preview.yml", "verify-persistence.py",
             "iOS/ConnectionStore.swift",
             "iOS/Cloud.swift", "iOS/FirstRun.swift", "iOS/Purchases.swift",
-            "iOS/PlanViews.swift",
+            "iOS/PlanViews.swift", "iOS/CloudAccountsView.swift",
             "iOS/QuotaAccessibilityPreview.swift", "iOS/QuotaDockApp.swift",
             "iOS/WatchSurfacePreview.swift", "iOS/WidgetSurfacePreview.swift",
             "Shared/Localization.swift", "Shared/ProviderIcon.swift",

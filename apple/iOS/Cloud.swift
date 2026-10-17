@@ -1540,20 +1540,6 @@ final class CloudModel: NSObject, ObservableObject, ASAuthorizationControllerDel
     }
 }
 
-private struct CloudAccountLabelField: View {
-    @State var draft: String
-    let save: (String) -> Void
-    var body: some View {
-        TextField(DockL10n.text("Account name or email"), text: $draft)
-            .textInputAutocapitalization(.never).autocorrectionDisabled()
-            .onChange(of: draft) { _, value in
-                let bounded = String(value.prefix(CloudAccountLabels.maximumLength))
-                if bounded != value { draft = bounded }
-                save(bounded)
-            }
-    }
-}
-
 struct CloudReadingsView: View {
     @Environment(\.locale) private var locale
     @ObservedObject var model: CloudModel
@@ -1634,7 +1620,7 @@ struct CloudView: View {
     @State private var quotaStorageConsent = false
     @State private var collectorProcessingConsent = false
     @AppStorage("cloudTrustedBaseURL") private var base = "https://usage.mvtp.cloud"
-    @State private var provider = ProviderID.claude
+    @State private var showAccounts = false
     @State private var confirmDelete = false
     @State private var collectorCode = ""
     @State private var selectedSlots = Set<UUID>()
@@ -1681,28 +1667,9 @@ struct CloudView: View {
                         if let deadline = model.liveDeadline { Text(DockL10n.format("Live ends: %@", DockL10n.date(deadline))).font(.caption) }
                     } else { Text(DockL10n.text("Live requires a server-verified paid entitlement.")).font(.caption) }
                 }
-                Picker(DockL10n.text("New slot"), selection: $provider) {
-                    ForEach([ProviderID.claude, .codex, .gemini, .grok], id: \.self) { Text($0.displayName).tag($0) }
-                }
-                Button(DockL10n.text("Add provider slot")) { Task { await model.mutate(path: "v2/accounts", method: "POST", body: ["provider": provider.rawValue]) } }.disabled(model.busy || model.liveEnabled || model.me == nil || model.me?.limits.accounts.map { model.slots.count >= $0 } == true)
+                Button(DockL10n.text("Accounts")) { showAccounts = true }
                 CloudBatchView(slots: model.slots, ids: model.refreshSelection.ids, locked: model.busy || model.selectionLocked, label: model.accountLabel) { ids in
                     model.selectRefreshSlots(ids)
-                }
-                Text(DockL10n.text("Only on this iPhone. Not sent to the server, Watch or widgets. Clear to remove.")).font(.caption)
-                ForEach(model.slots) { slot in
-                    VStack(alignment: .leading) {
-                        Text(model.accountTitle(slot.id, provider: slot.provider))
-                        CloudAccountLabelField(draft: model.accountLabel(slot.id)) {
-                            model.setAccountLabel($0, id: slot.id)
-                        }.id("\(model.labelScope ?? "")/\(slot.id)")
-                        Text(slot.id.uuidString).font(.caption).textSelection(.enabled)
-                        Button(DockL10n.text("Copy nonsecret slot UUID")) { UIPasteboard.general.string = slot.id.uuidString }
-                        if let account = model.snapshot?.accounts.first(where: { $0.id == slot.id }) {
-                            ProviderCard(provider: account.reading, demo: model.snapshot?.demo == true)
-                            if account.lastError != nil { Text(DockL10n.text("Last collection unavailable; original observation retained.")).font(.caption) }
-                        } else { Text(DockL10n.text("Unknown — awaiting local collector")) }
-                        Button(DockL10n.text("Remove slot"), role: .destructive) { Task { await model.mutate(path: "v2/accounts/\(slot.id.uuidString)", method: "DELETE") } }.disabled(model.busy || model.liveEnabled)
-                    }
                 }
                 Section(DockL10n.text("Local collector approval")) {
                     Text(DockL10n.text("Duplicate-provider slots require independent CLI account mappings; Gemini remains limited to one local account. Approval authorizes slot access, not validation of real provider identities. It grants quota jobs for these slots only, not your Apple session. Never copy or export the Apple session.")).font(.caption)
@@ -1738,6 +1705,9 @@ struct CloudView: View {
                 NavigationLink(DockL10n.text("Plans")) { PlansView(model: model) }
             }
         }.navigationTitle(DockL10n.text("Optional cloud"))
+            .sheet(isPresented: $showAccounts) {
+                CloudAccountsView(model: model).presentationDetents([.medium, .large])
+            }
             .onChange(of: base) { _, _ in
                 quotaStorageConsent = false; collectorProcessingConsent = false
             }

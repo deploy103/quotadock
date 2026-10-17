@@ -367,8 +367,9 @@ test('plans stay read-only, bilingual and concise without collecting paired quot
       await expect(page.getByRole('article')).toHaveCount(3);
       await expect(page.getByRole('article', { name: 'Plus', exact: true })).toContainText('3,990');
       await expect(page.getByRole('article', { name: 'Pro', exact: true })).toContainText(language === 'ko' ? '가격 미정' : 'Price undecided');
-      await expect(page.getByRole('button')).toHaveCount(2);
-      for (const button of await page.getByRole('button').all()) await expect(button).toBeDisabled();
+      await expect(page.getByRole('article', { name: 'Plus', exact: true })).toContainText(language === 'ko' ? '/ 월' : '/ month');
+      await expect(page.getByRole('button')).toHaveCount(0);
+      await expect(page.locator('main')).not.toContainText(/목표|출시|준비 중|release target|not on sale|not available yet|month target/i);
       await expect(page.locator('.plan-terms')).not.toHaveAttribute('open');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       if (process.env.CAPTURE_PLANS) await page.screenshot({ path: `.amp/in/artifacts/plans-${language}-${width}.png`, fullPage: true });

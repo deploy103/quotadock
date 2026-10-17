@@ -313,16 +313,21 @@ runtime acceptance. No later workstation change is installed on that phone.
 
 Settings and cloud management now link to a dedicated Free/Plus/Pro screen. Real
 prices remain StoreKit-owned and paid status remains server-owned. The browser
-comparison is read-only and explicitly labels release targets, not live offers.
+comparison is read-only, without checkout or development/launch-target banners.
+Product screens omit placeholder purchase buttons; unavailable products cannot
+be purchased. The dashboard person icon opens an account sheet with private
+labels, UUID-specific collector approval and confirmed account removal. Approval
+is scoped to the current login family, not inferred provider sign-in. The actual
+local CLI account still requires its independent fingerprint mapping.
 User-entered cloud slot names/emails stay phone-private and are never added to
 collector payloads, App Group snapshots or Watch transfers.
 
 Workstation checks: production web build, 30 Chromium browser tests, 24 bridge
 tests (one root-only test skipped), and 20 non-root Foundation tests passed.
-The final pricing render also passed the targeted browser test after its disabled
-control contrast was improved. EN/KO at 320/390/1440 pixels and expanded terms were
-inspected. Swift frontend syntax checks are not iOS SDK typechecking or a native
-render: both remain required for these new Apple UI changes. Existing real-provider,
+The landing cleanup also passed its build and 17 browser tests. Final EN/KO plans
+at 320/390/1440 pixels and expanded terms were inspected. Swift frontend syntax
+checks are not iOS SDK typechecking or a native render: both remain required for
+the new account sheet and Apple plan controls. Existing real-provider,
 widget/Watch, StoreKit, recovery and eligible Apple Team gates below remain open.
 
 ## Release sequence and required evidence

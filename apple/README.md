@@ -48,9 +48,18 @@ StoreKit; the current-plan badge comes from the server, never a local selection.
 Unavailable products cannot be purchased. Renewal terms stay in an expandable
 section; restore remains accessible. The isolated preview shares only this
 presentation, with purchases disabled. The workstation browser has a read-only
-comparison at `/?view=plans`; its ₩3,990 Plus price is a release target, not an offer.
+comparison at `/?view=plans`; it has no checkout. Product screens omit development
+milestones and placeholder purchase buttons. Pro pricing remains undecided.
 
-Cloud slots accept a manually entered **Account name or email**. Labels are not
+Open the dashboard's person icon for the **Accounts** sheet. Add a provider, then
+open its individual account to enter a name/email, inspect quota and copy its UUID.
+**Link this account** approves the computer's pairing code for that UUID only,
+with explicit consent bound to the current server/login family. Map the UUID to
+the correct durable local CLI account fingerprint separately; approval is not
+provider sign-in or proof of a fresh reading. Collector revocation remains in
+connection settings. Removing an account requires confirmation.
+
+Accounts accept a manually entered **Account name or email**. Labels are not
 verified provider identities. They stay in private iPhone preferences, scoped to
 the server, login family and slot, and are absent from uploads, shared caches,
 Watch/widgets and logs. Logout/account deletion clears the current scope; removing
@@ -209,7 +218,7 @@ Simulator and disposable-server renewal contracts passed in post-noon validation
 below. Real Apple authorization, device lock/restart and deployed recovery remain
 unverified; injected simulator transport is not genuine Apple authentication.
 
-`/v2/me` displays verified tier, limits, early-refresh and Live counters; `/v2/accounts` manages UUID slots (Free three, Plus ten, Pro uncapped registration, enforced server-side); `/v2/snapshot` preserves separate same-provider accounts and every window. Unconfigured pilot entitlements are Free only; purchase controls remain unavailable. Phone rows use account UUIDs, with an eight-character UUID label rather than an invented account name. Full sanitized account cache stays in the iPhone sandbox. **Watch/widgets intentionally receive only the first server-listed account per provider**, not all accounts; current server ordering is ascending account UUID. Do not treat these surfaces as account totals. Both caches preserve the original observation timestamp, not the fetch time. Server `lastError` is presented as fixed safe text; raw errors/names are not exported.
+`/v2/me` displays verified tier, limits, early-refresh and Live counters; `/v2/accounts` manages UUID slots (Free three, Plus ten, Pro uncapped registration, enforced server-side); `/v2/snapshot` preserves separate same-provider accounts and every window. Unconfigured pilot entitlements are Free only; purchase controls remain unavailable. Phone rows use account UUIDs and private user-entered labels, falling back to eight UUID characters. Full sanitized account cache stays in the iPhone sandbox. **Watch/widgets intentionally receive only the first server-listed account per provider**, not all accounts; current server ordering is ascending account UUID. Do not treat these surfaces as account totals. Both caches preserve the original observation timestamp, not the fetch time. Server `lastError` is presented as fixed safe text; raw errors/names are not exported.
 
 StoreKit 2 purchase/restore source requires `purchasesAvailable` and the UUID
 `appAccountToken` from authenticated `/v2/me`. It loads only the known monthly
