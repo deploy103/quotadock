@@ -97,17 +97,23 @@ last successful **source observation**, not the cache-read time. Automatic local
 collection defaults on and can be disabled independently of app-open refresh.
 An offline collector cannot produce fresh usage, even while the server is online.
 
-| Planned tier | Slots | Due interval | Early manual refresh | Live sessions |
-|---|---:|---|---|---|
-| Free | 3 | 120 min | 10 successful batches/KST day | — |
-| Plus | 10 | 60 min | Unlimited, server spacing applies | 5/verified subscription period |
-| Pro | Unlimited registration | 20/30/60/120 min | Unlimited, server spacing applies | 5/KST day |
+| QuotaDock plan | Accounts | Collector computers | Monthly / annual KRW |
+|---|---:|---:|---|
+| Free | 3 | 1 | Free |
+| Plus | 10 | 3 | ₩2,990 / ₩29,900 |
+| Pro | 25 | 5 | ₩5,990 / ₩59,900 |
+
+Plus monthly and annual can include the **first month free**, only when Apple has
+a configured one-month introductory offer and the purchaser is eligible. Pro has
+no free trial. Prices above describe product policy; actual localized prices and
+renewal charges come from StoreKit. One introductory offer per subscription group;
+deleting the cloud account does not cancel an Apple subscription.
 
 Server policies and native StoreKit purchase/restore source are implemented;
 **purchases remain disabled on the unconfigured pilot**. Product/signature/account
 checks precede server verification; only the server's authoritative account read
 applies a tier. Failed new deliveries remain unfinished for reconnect/Restore.
-Plus targets ₩3,990/month; Pro price is undecided. Live explicitly opts into
+Live explicitly opts into
 foreground requests at a target 60-second spacing for a server-owned 30-minute
 session. Hidden/locked apps pause requests without extending that deadline.
 Failed first collection, cached reads and duplicate completion do not spend a
@@ -117,12 +123,23 @@ Terminal processing can include collection failure and never guarantees fresh
 quota. See the [release plan and failure contracts](docs/release-plan.md) for
 purchase, cancellation, ownership, offline and signed-device acceptance gates.
 
-The collector supports explicit durable-key mapping for independently configured
-Claude/Codex/Grok accounts; Gemini remains one local account. Older CodexBar builds
-without account keys cannot silently reuse the active login. The phone selects
-up to 50 slots per refresh/Live batch, independently of registration count.
-Watch/widgets still show only the first server-listed slot per provider, not
-account totals. Real-provider multi-account validation remains a release gate.
+**Independent provider-account collection is not verified.** Public CodexBar
+0.77.1 usage JSON omits the internal account-selection key; discovery now reports
+`unsupported_identity` instead of pretending no accounts exist. Explicit-key
+adapters identify local scopes, not verified unique provider owners. A missing or
+ambiguous mapping never falls back to a label, order or ambient account. See the
+[collector compatibility boundary](bridge/cloud.md#independent-accounts).
+Unmapped single-provider bridge readings are not verified account identities.
+
+The phone selects up to 50 slots per refresh/Live batch; legacy excess records
+are retained rather than silently deleted. New configurable widgets and Watch
+source select exact UUIDs/windows and keep a removed selection unavailable. Names
+and emails remain iPhone-private. Legacy static widget kinds retain the first-slot
+projection. The new Apple UI/AppIntent integration compiles against Xcode 27.1
+for all four targets; simulator contracts and isolated presentation hosts run
+without provider access. Those hosts are not installed system widgets or a paired
+Watch. Actual provider access, policy permission and two real independent accounts
+remain unverified; see [current validation limits](apple/BILLING.md#validation-limits).
 
 The server stores sanitized quota **and pseudonymous identity, hashed sessions,
 collector grants, consent, billing/transaction IDs and counters**. A database leak

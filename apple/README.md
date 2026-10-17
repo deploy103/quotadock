@@ -48,8 +48,15 @@ StoreKit; the current-plan badge comes from the server, never a local selection.
 Unavailable products cannot be purchased. Renewal terms stay in an expandable
 section; restore remains accessible. The isolated preview shares only this
 presentation, with purchases disabled. The workstation browser has a read-only
-comparison at `/?view=plans`; it has no checkout. Product screens omit development
-milestones and placeholder purchase buttons. Pro pricing remains undecided.
+comparison at `/?view=plans`; it has no checkout.
+
+Free supports 3 accounts/1 collector, Plus 10/3 and Pro 25/5. Korean storefront
+configuration targets are Plus KRW 2,990/month or 29,900/year and Pro KRW
+5,990/month or 59,900/year. Only eligible Plus monthly/annual products with a
+configured one-calendar-month free trial may offer it; StoreKit metadata,
+`displayPrice` and eligibility are authoritative. One introductory offer is
+allowed per subscription group. Annual Plus benefits refill monthly; existing
+Live and due-refresh policies are unchanged. See [billing](BILLING.md).
 
 Open the dashboard's person icon for the **Accounts** sheet. Add a provider, then
 open its individual account to enter a name/email, inspect quota and copy its UUID.
@@ -218,10 +225,20 @@ Simulator and disposable-server renewal contracts passed in post-noon validation
 below. Real Apple authorization, device lock/restart and deployed recovery remain
 unverified; injected simulator transport is not genuine Apple authentication.
 
-`/v2/me` displays verified tier, limits, early-refresh and Live counters; `/v2/accounts` manages UUID slots (Free three, Plus ten, Pro uncapped registration, enforced server-side); `/v2/snapshot` preserves separate same-provider accounts and every window. Unconfigured pilot entitlements are Free only; purchase controls remain unavailable. Phone rows use account UUIDs and private user-entered labels, falling back to eight UUID characters. Full sanitized account cache stays in the iPhone sandbox. **Watch/widgets intentionally receive only the first server-listed account per provider**, not all accounts; current server ordering is ascending account UUID. Do not treat these surfaces as account totals. Both caches preserve the original observation timestamp, not the fetch time. Server `lastError` is presented as fixed safe text; raw errors/names are not exported.
+`/v2/me` displays verified tier, limits, early-refresh and Live counters;
+`/v2/accounts` manages UUID slots (Free 3, Plus 10, Pro 25, enforced server-side).
+`/v2/snapshot` preserves separate same-provider accounts and every window.
+Phone rows use UUIDs and private unverified labels. Schema-v3 sanitized account
+snapshots support fixed UUID/window widget selections, medium two-account
+comparisons, `quotadock://account/<UUID>` links and Watch account/window selection.
+Missing selections stay unavailable, never retarget another account. Legacy
+static provider widgets and legacy Watch views still use a first-account-per-
+provider projection; neither surface represents totals. Names/emails never enter
+these shared snapshots. Original observation times survive caching and transfer;
+server errors use fixed safe text. Real device delivery remains unverified.
 
 StoreKit 2 purchase/restore source requires `purchasesAvailable` and the UUID
-`appAccountToken` from authenticated `/v2/me`. It loads only the known monthly
+`appAccountToken` from authenticated `/v2/me`. It loads only the known monthly and annual
 auto-renewable products and shows Apple's localized price. Apple signature and
 account checks precede transient signed-transaction submission to the server;
 only a valid accepted response permits `finish()`. Failed new deliveries remain
@@ -244,7 +261,7 @@ Foreground automatic refresh honors Settings and submits `mode:auto`; manual/pul
 Modern reads traverse tenant-owned snapshot pages at 250 rows using ascending
 UUID cursors and derive slots from those same rows, avoiding a second account
 traversal. A full read is bounded to 60 seconds, 8 MiB and 20 pages (5,000 slots),
-independent of the server's uncapped Pro registration. Request starts are spaced
+independent of the current 25-account Pro limit. Request starts are spaced
 at least 500 ms apart. Malformed, duplicate, nonadvancing or incomplete pages
 retain the last usable reading; pages are not a frozen snapshot across requests.
 Only a first-page 404 enables legacy fallback, which also validates the snapshot
@@ -273,9 +290,30 @@ cannot be assumed revoked.
 
 Graphite/mint bars mean **remaining**, clamped to 0–100, never summed. Null is unknown, not exhausted. Plans are displayed as supplied by the sanitized contract; null is “Plan unknown.” Codex refers to the **Codex allowance under a ChatGPT plan**, not overall ChatGPT usage. Gemini window labels are preserved as model tiers. Unavailable/error providers remain visible, diagnostics are replaced with fixed safe text, and readings older than 15 minutes are stale. Reset dates are informational, not a quota promise.
 
-“Explore demo” is explicitly labeled and stays in memory: it never overwrites live cache or transfers fabricated readings. Xcode/WidgetKit previews and placeholders use `Snapshot.preview`, with `demo: true` and `source: demo` everywhere. To see demo widgets on devices, use a bridge explicitly running demo mode.
+“Explore demo” is explicitly labeled and stays in memory: it never overwrites live cache or transfers fabricated readings. Legacy Xcode/WidgetKit samples use `Snapshot.preview`, with `demo: true` and `source: demo`. Selected-account widget placeholders instead have no account snapshot and remain unavailable.
 
 ## Architecture and verification
+
+The 2026-10-17 isolated Mac validation compiled the final iPhone, iOS widget,
+Watch and Watch-widget targets with Xcode 27.1. All **110 hosted native units,
+four production onboarding UI tests and 31 macOS Foundation contracts** passed.
+The original three onboarding flows and entitlement-read coalescing assertions
+remain unchanged. The added EN/KO footer regression scrolls the complete final
+paragraph above the fixed footer, with 44pt clearance in both languages.
+
+Six isolated presentation tests passed for monthly/annual Plus eligible/ineligible
+display, Pro with an adversarial trial flag, Korean accessibility3 text, UUID
+selection, missing accounts and shared Watch selection/trust confirmation.
+Small/medium/rectangular/circular/inline host captures were inspected, including
+distinct 0% and stale 73% accounts and a missing UUID without substitution.
+These are iPhone-hosted shared components, not installed WidgetKit surfaces or
+a running Watch. Purchase callbacks are inert, not StoreKit eligibility proof.
+There is no Watch runtime on that Mac; no phone, provisioning or Apple account
+was used. Actual Apple purchases and paired-device behavior remain open; see
+[billing validation limits](BILLING.md#validation-limits).
+
+The older validation runs below are historical evidence for their tested
+revisions, not acceptance of later source.
 
 - `Shared/Snapshot.swift`: contract v1 Codable values, shared 64-byte ASCII ISO8601 quota dates truncated to server milliseconds, explicit null re-encoding, 256 KiB bound, safe-message sanitization and demo samples.
 - `Shared/Bridge.swift`: HTTPS pairing, Keychain and ephemeral URLSession client; rejects redirects/non-200/schema errors.

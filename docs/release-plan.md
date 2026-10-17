@@ -1,8 +1,11 @@
 # Release plan and failure contracts
 
-Source-preview plan, updated 2026-10-15. Implemented code is not a signed release or proof
+Source-preview plan, documentation updated 2026-10-17. Implemented code is not a signed release or proof
 of Apple purchases, provider access, public HTTPS or physical-device behavior.
 Release gates remain open until their real-stack scenarios below pass.
+Historical validation below applies to its tested revision. The 2026-10-17
+product-review follow-up is described separately near the end; neither is
+acceptance of real Apple/provider/device behavior.
 
 The historical 2026-10-14 12:00 KST gate passed. [Post-noon application CI](https://github.com/quotadock-dev/quotadock/actions/runs/38506753875)
 passed 73 native tests and iPhone/Watch/WidgetKit builds, 30 Node 22 tests and
@@ -77,10 +80,10 @@ not either credential. The server owns tier enforcement and job accounting.
 Its database also stores pseudonymous identity, consent, hashes, transaction
 identifiers and counters; a database leak would expose that metadata too.
 
-Free registers 3 slots, Plus 10, Pro uncapped. Every refresh selects at most 50.
+Free supports 3 accounts/1 collector, Plus 10/3, Pro 25/5. Every refresh selects at most 50.
 Due intervals are Free 120m, Plus 60m and Pro 20/30/60/120m. A successful early
 Free batch costs one of 10 allowances per KST day, not one per account. Plus
-Live allows 5 sessions per verified subscription period, Pro 5 per KST day.
+Live allows 5 sessions per monthly benefit period (also on annual billing), Pro 5 per KST day.
 The server starts Live's 30-minute deadline on first fresh measured success.
 Local collection needs an online computer; iOS background and WidgetKit timing
 cannot guarantee these intervals.
@@ -131,10 +134,14 @@ rejected. Observation timestamps never stand in for job identity.
 
 1. Read authenticated `/v2/me`. Purchases need server availability, its UUID
    `appAccountToken` and the current session; quota/provider plans grant nothing.
-2. Load only the known monthly auto-renewable Plus/Pro products. Display Apple's
-   localized price; Plus's intended KRW 3,990 is not a hard-coded purchase price.
-   Pro price is still undecided. No product or unavailable verification means
-   no purchase button. Register both products in one subscription group.
+2. Load the four known monthly/annual auto-renewable Plus/Pro products in one
+   subscription group. Korean targets are Plus KRW 2,990/month or 29,900/year,
+   Pro 5,990/month or 59,900/year; only StoreKit `displayPrice` is displayed.
+   Plus alone may offer a configured, eligible one-calendar-month free trial on
+   either cadence: metadata and Apple eligibility must both agree. One intro
+   per person per subscription group; no Pro trial. Recheck the promised offer
+   and price before purchase; changes stop purchase, not silently paid billing.
+   Show annual totals and renewal terms. Unavailable products cannot be purchased.
 3. Purchase with that UUID; pending approval and cancellation do not grant access.
 4. Require StoreKit verification and exact account ownership. Send the bounded
    signed transaction transiently to the server; never persist or log the JWS.
@@ -171,13 +178,11 @@ even for the same Apple sign-in. Define and validate an authenticated recovery
 policy before opening sales; never bypass ownership or retain erased identity
 records silently to make Restore appear successful.
 
-The editable cloud URL also selects the issuer of `appAccountToken` and the
-receipt-delivery destination. HTTPS alone does not establish that a custom
-operator can honor the publisher's App Store products. Recommended release
-policy: purchases for these product IDs use only the official hosted origin;
-custom bridge origins and development cloud endpoints remain separate. This
-restriction is a proposal, not implemented behavior. Decide and test the origin
-policy before enabling sales, including existing sessions saved for another URL.
+The native billing policy permits purchases/recovery/receipt delivery only at
+the official HTTPS `usage.mvtp.cloud` origin, default port 443, without credentials,
+custom path, query or fragment. Custom origins cannot honor these products merely
+by using HTTPS. Signed StoreKit verification of this guard, including old saved
+custom-origin sessions, remains required before sales.
 
 A client-only signed ownership/count proof cannot preserve Live spending across
 repeated erasure: an older valid proof can replay a lower count. One proposal is
@@ -322,15 +327,39 @@ local CLI account still requires its independent fingerprint mapping.
 User-entered cloud slot names/emails stay phone-private and are never added to
 collector payloads, App Group snapshots or Watch transfers.
 
-Workstation checks: production web build, 30 Chromium browser tests, 24 bridge
-tests (one root-only test skipped), and 20 non-root Foundation tests passed.
-The landing cleanup also passed its build and 17 browser tests. Final EN/KO plans
-at 320/390/1440 pixels and expanded terms were inspected. Swift frontend syntax
-checks are not iOS SDK typechecking or a native render: both remain required for
-the new account sheet and Apple plan controls. Existing real-provider,
-widget/Watch, StoreKit, recovery and eligible Apple Team gates below remain open.
+Product-review follow-up: the app passed its build, 30 Chromium contracts,
+55 bridge contracts (one root-only skip), 10 imported skill contracts and
+31 nonroot Linux Foundation tests. The landing passed 18 browser contracts,
+its build and Chromium/macOS WebKit CI. EN/KO monthly/annual plans and expanded
+terms at 320/390/1440 pixels were rendered and inspected. Disposable PostgreSQL
+backend tests passed 74 Python and 127 separate legacy Node contracts; dependency
+audits found no known vulnerabilities at the checked versions.
+
+The reauthorized isolated Mac check compiled all four Apple targets with
+Xcode 27.1 and passed 110 hosted units, four production onboarding UI tests,
+31 macOS Foundation contracts and six isolated presentation tests. Original
+renewal ownership/coalescing assertions remain unchanged. The new EN/KO footer
+regression proves the last paragraph scrolls fully above Finish setup, with
+44pt clearance. Shared widget/Watch hosts cover fixed UUID/window selection,
+missing UUID, zero/unknown/stale, monthly/annual Plus offers, Pro without trial
+and large text. Hosts and inert callbacks do not establish actual StoreKit
+eligibility, system widgets or paired Watch delivery. Those, provider access,
+recovery and eligible Apple Team gates below remain open.
 
 ## Release sequence and required evidence
+
+Current schema-v3 account surfaces use fixed UUID/window widget selections,
+medium comparisons, UUID deep links and Watch account/window selection. Missing
+selections remain unavailable; legacy static widgets/Watch projections still
+show only the first account per provider. Labels/emails remain phone-private and
+unverified. Real WidgetKit rendering and paired Watch delivery are open gates.
+
+CodexBar HEAD `6480977b` public CLI JSON omits internal `cacheAccountKey`.
+Recent installation alone does not enable keyed `--all-accounts` output; cloud
+multi-account collection fails closed with `unsupported_identity`/`ambiguous_scope`.
+The standalone experimental `bridge/codex-app-server.mjs` is not integrated,
+cloud-ready or real-account verified. It exposes workspace-scoped Codex quota
+without email, not verified humans or total ChatGPT usage. No credential scraping.
 
 | Stage | Exit evidence | Current gate |
 |---|---|---|
