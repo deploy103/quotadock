@@ -79,7 +79,9 @@ private struct PreviewDashboard: View {
                         ForEach(SampleScenario.allCases, id: \.self) { state in
                             Text(setupText(state.rawValue)).tag(state)
                         }
-                    }.accessibilityIdentifier("preview-scenario")
+                    }
+                    .id(settings.locale.identifier)
+                    .accessibilityIdentifier("preview-scenario")
                     ForEach(scenario.snapshot(from: original).providers) { provider in
                         ProviderCard(provider: provider, demo: true)
                     }
