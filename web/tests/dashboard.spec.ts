@@ -240,7 +240,11 @@ test('an unsaved automatic-check choice remains effective and its warning surviv
     };
     return () => { Storage.prototype.setItem = original; };
   });
-  await page.locator('#auto-refresh').uncheck(); await expect(page.locator('#auto-refresh')).toBeFocused();
+  // Safari need not focus a checkbox on pointer clicks. Exercise the keyboard
+  // contract explicitly: publishing the save warning must not steal focus.
+  const autoRefresh = page.locator('#auto-refresh');
+  await autoRefresh.focus(); await page.keyboard.press('Space');
+  await expect(autoRefresh).not.toBeChecked(); await expect(autoRefresh).toBeFocused();
   await expect(page.locator('#auto-refresh-warning')).toContainText('자동 확인 설정을 저장하지 못했습니다.');
   await page.clock.fastForward(120000); expect(calls).toBe(1);
   if (process.env.CAPTURE_DASHBOARD) await page.screenshot({ path: '.amp/in/artifacts/auto-refresh-unsaved-ko.png', fullPage: true });
