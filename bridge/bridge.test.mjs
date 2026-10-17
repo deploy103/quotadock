@@ -57,6 +57,10 @@ test('HTTP contract requires bearer; rejects hostile origin/host, traversal, wri
   assert.equal((await fetch(`${base}/v1/snapshot`, { method: 'POST', headers: auth })).status, 405);
   assert.equal((await fetch(`${base}/%2e%2e/.git/config`)).status, 404);
   assert.equal((await fetch(`${base}/icons/grok.svg`)).status, 200);
+  const chevron = await fetch(`${base}/chevron-down.svg`);
+  assert.equal(chevron.status, 200);
+  assert.equal(chevron.headers.get('content-type'), 'image/svg+xml');
+  assert.match(chevron.headers.get('content-security-policy'), /img-src 'self';/);
   snapshot = { data: 'x'.repeat(262145) };
   assert.equal((await fetch(`${base}/v1/snapshot`, { headers: auth })).status, 503);
   snapshot = demoSnapshot();

@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/style.css': ['style.css', 'text/css; charset=utf-8'] };
 files['/favicon.svg'] = ['favicon.svg', 'image/svg+xml'];
+files['/chevron-down.svg'] = ['chevron-down.svg', 'image/svg+xml'];
 for (const id of ['claude', 'codex', 'gemini', 'grok']) files[`/icons/${id}.svg`] = [`icons/${id}.svg`, 'image/svg+xml'];
 const loopback = host => ['127.0.0.1', '::1', 'localhost'].includes(host);
 

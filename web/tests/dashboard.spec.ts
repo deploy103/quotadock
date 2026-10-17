@@ -331,6 +331,10 @@ test('a positive quota below display precision is not presented as exhausted', a
 test('demo desktop/mobile appearance, icons and unknown Grok', async ({ page }) => {
   await page.goto('/?demo=1'); await expect(page.locator('#mode')).toContainText('DEMO'); await expect(page.getByRole('progressbar')).toHaveCount(6); await expect(page.locator('.provider').last().getByRole('progressbar')).toHaveCount(0); await expect(page.locator('#auto-refresh')).toBeDisabled();
   expect(await page.locator('.provider-icon').evaluateAll(images => images.every(img => img instanceof HTMLImageElement && img.naturalWidth > 0))).toBe(true);
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect((await page.locator('header select').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
   const codexGuide = page.getByText('Codex 허용량 · 전체 ChatGPT 사용량 아님. Free 지원은 화면·롤아웃에 따라 다르며 측정 불가는 알 수 없음입니다.', { exact: true });
   await expect(codexGuide).toBeHidden();
   await page.getByText('Codex 안내', { exact: true }).focus(); await page.keyboard.press('Enter');
