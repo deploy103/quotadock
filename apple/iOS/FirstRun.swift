@@ -162,9 +162,12 @@ struct FirstRunView: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        HStack {
+                        let headerLayout = previewTypeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                            : AnyLayout(HStackLayout())
+                        headerLayout {
                             Text("QUOTADOCK").font(.caption.weight(.semibold)).tracking(2)
-                            Spacer()
+                            if !previewTypeSize.isAccessibilitySize { Spacer() }
                             Text(setupFormat("Step %@ of 3", String(progress.step.index + 1)))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.id("setup-top")

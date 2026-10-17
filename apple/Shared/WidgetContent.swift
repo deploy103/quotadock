@@ -13,6 +13,11 @@ struct AccountSurfaceContent: View {
         guard let reading = account?.reading, let observed = reading.observedAt else { return DockL10n.text("Not observed") }
         return DockL10n.format("%@ · %@", DockL10n.text(reading.isStale(at: date) ? "Stale" : "Observed"), DockL10n.date(observed))
     }
+    private var compactFreshness: String {
+        guard let reading = account?.reading, let observed = reading.observedAt else { return DockL10n.text("Not observed") }
+        let timestamp = observed.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits).hour().minute().locale(DockL10n.locale))
+        return DockL10n.format("%@ · %@", DockL10n.text(reading.isStale(at: date) ? "Stale" : "Observed"), timestamp)
+    }
     private var status: String {
         DockL10n.text(account?.observedAt == nil ? "Not observed" : account?.reading.isStale(at: date) == true ? "Stale" : "Cached")
     }
@@ -67,24 +72,34 @@ struct AccountSurfaceContent: View {
                 Spacer(minLength: 0)
                 Text(identifier).monospaced().foregroundStyle(.secondary)
             }.font(.caption2).lineLimit(1).minimumScaleFactor(0.8)
-            if surface != .rectangular && surface != .medium {
+            if surface == .large {
                 Text(account?.plan ?? DockL10n.text("Plan unknown")).font(.caption2).foregroundStyle(.secondary)
             }
-            HStack(spacing: 3) {
-                Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable")).lineLimit(1)
-                Spacer(minLength: 0)
-                Text(value).font(surface == .small ? .title2.weight(.semibold) : .caption.weight(.semibold))
-                    .monospacedDigit().fixedSize()
-            }.font(surface == .rectangular ? .caption2 : .caption)
+            if surface == .small {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable"))
+                        .font(.caption2).fixedSize(horizontal: false, vertical: true)
+                    Text(value).font(.title2.weight(.semibold)).monospacedDigit().fixedSize()
+                }
+            } else {
+                HStack(spacing: 3) {
+                    Text(window.map(QuotaPresentation.window) ?? DockL10n.text("Window unavailable"))
+                        .lineLimit(surface == .rectangular ? 2 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Text(value).font(.caption.weight(.semibold)).monospacedDigit().fixedSize()
+                }.font(surface == .rectangular ? .caption2 : .caption)
+            }
             if let remaining = window?.clampedRemaining {
                 ProgressView(value: remaining, total: 100).tint(DockTheme.mint).accessibilityHidden(true)
             }
-            if surface != .rectangular && surface != .medium, let reset = window?.resetsAt {
+            if surface == .large, let reset = window?.resetsAt {
                 Text(reset <= date ? DockL10n.text("Reset passed · awaiting observation") :
                     DockL10n.format("Reset: %@", DockL10n.date(reset))).font(.system(size: 9))
             }
-            Text(freshness).font(.system(size: 9)).foregroundStyle(.secondary)
-            if surface != .rectangular && surface != .medium {
+            Text(compactFreshness).font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if surface == .large {
                 Text(DockL10n.text("Cached readings · not live")).font(.system(size: 9))
             }
         }
