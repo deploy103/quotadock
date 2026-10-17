@@ -18,6 +18,11 @@ struct AccountSurfaceContent: View {
     }
     private var identifier: String { account.map { String($0.id.uuidString.prefix(8)) } ?? "—" }
     private var value: String { window.flatMap(QuotaPresentation.percent) ?? DockL10n.text("Unknown") }
+    private var accessibilitySummary: String {
+        let provider = account?.provider.displayName ?? DockL10n.text("Account unavailable")
+        let selected = accountID.map { "account-" + $0.uuidString.lowercased() } ?? DockL10n.text("Choose account")
+        return "\(provider). \(selected). \(freshness)"
+    }
 
     var body: some View {
         Group {
@@ -30,8 +35,7 @@ struct AccountSurfaceContent: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityHint((account?.provider.displayName ?? DockL10n.text("Account unavailable")) + ". " +
-            (accountID.map { "account-" + $0.uuidString.lowercased() } ?? DockL10n.text("Choose account")) + ". " + freshness)
+        .accessibilityHint(accessibilitySummary)
     }
 
     private var inlineContent: some View {
